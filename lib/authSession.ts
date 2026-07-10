@@ -13,18 +13,33 @@ export interface UserSession {
   memberLevelLabel: string;
 }
 
+// ─── In-Memory Token Cache ──────────────────────────────────────────────────
+// Fallback: keep token in memory so it works even if SQLite has issues
+let memoryToken: string | null = null;
+
 // ─── Token Functions ────────────────────────────────────────────────────────
 
 /**
- * Get the stored [REDACTED_TOKEN] (Sanctum [REDACTED_TOKEN])
+ * Get the stored Bearer token (Sanctum token)
  */
 export async function getAuthToken(): Promise<string | null> {
+  // First check in-memory cache (fastest, always works)
+  if (memoryToken) {
+    return memoryToken;
+  }
+
+  // Then try SQLite
   try {
     const db = await getDatabase();
+    await db.execAsync(`CREATE TABLE IF NOT EXISTS auth_tokens (id INTEGER PRIMARY KEY, token TEXT DEFAULT '');`);
     const row = await db.getFirstAsync<{ token: string }>(
       'SELECT token FROM auth_tokens WHERE id = 1'
     );
-    return row?.token || null;
+    const token = row?.token || null;
+    if (token) {
+      memoryToken = token; // Cache it
+    }
+    return token;
   } catch (error) {
     console.warn('[authSession] getAuthToken error:', error);
     return null;
@@ -32,28 +47,36 @@ export async function getAuthToken(): Promise<string | null> {
 }
 
 /**
- * Store the [REDACTED_TOKEN] in SQLite
+ * Store the Bearer token
  */
 export async function setAuthToken(token: string): Promise<void> {
+  // Always set in memory first (immediate, guaranteed)
+  memoryToken = token;
+  console.log('[authSession] Token set in memory, length:', token.length);
+
+  // Then persist to SQLite (best-effort)
   try {
     const db = await getDatabase();
-    await db.runAsync(
-      'INSERT OR REPLACE INTO auth_tokens (id, token) VALUES (1, ?)',
-      [token]
-    );
+    await db.execAsync(`CREATE TABLE IF NOT EXISTS auth_tokens (id INTEGER PRIMARY KEY, token TEXT DEFAULT '');`);
+    await db.execAsync(`DELETE FROM auth_tokens;`);
+    // Use execAsync with escaped string since runAsync has binding issues
+    const escaped = token.replace(/'/g, "''");
+    await db.execAsync(`INSERT INTO auth_tokens (id, token) VALUES (1, '${escaped}');`);
+    console.log('[authSession] Token persisted to SQLite');
   } catch (error) {
-    console.warn('[authSession] setAuthToken error:', error);
-    throw error;
+    console.warn('[authSession] setAuthToken SQLite error (token still in memory):', error);
+    // Don't throw — token is in memory and will work for this session
   }
 }
 
 /**
- * Clear the stored [REDACTED_TOKEN]
+ * Clear the stored token
  */
 export async function clearAuthToken(): Promise<void> {
+  memoryToken = null;
   try {
     const db = await getDatabase();
-    await db.runAsync('DELETE FROM auth_tokens WHERE id = 1');
+    await db.execAsync('DELETE FROM auth_tokens;');
   } catch (error) {
     console.warn('[authSession] clearAuthToken error:', error);
   }
@@ -109,6 +132,9 @@ export async function getLoggedInUser(): Promise<UserSession | null> {
  * Login user — insert/replace in SQLite with is_logged_in = 1 + store token
  */
 export async function loginUser(user: UserSession, token: string): Promise<void> {
+  // Store token first (in-memory + SQLite)
+  await setAuthToken(token);
+
   try {
     const db = await getDatabase();
 
@@ -121,12 +147,9 @@ export async function loginUser(user: UserSession, token: string): Promise<void>
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [user.id, user.name, user.firstName, user.email, user.phone, user.avatar, user.memberLevel, user.memberLevelLabel]
     );
-
-    // Store the [REDACTED_TOKEN]
-    await setAuthToken(token);
   } catch (error) {
     console.warn('[authSession] loginUser error:', error);
-    throw error;
+    // Don't throw — token is already in memory
   }
 }
 
@@ -140,6 +163,5 @@ export async function logoutUser(): Promise<void> {
     await clearAuthToken();
   } catch (error) {
     console.warn('[authSession] logoutUser error:', error);
-    throw error;
   }
 }

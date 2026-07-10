@@ -886,6 +886,7 @@ export default function Home() {
         delivery_fee: dineInOrder.deliveryFee,
         discount: dineInOrder.discount,
         total: dineInOrder.total,
+        payment_method: 'COD',
         items: cart.map(item => ({
           product_id: Number(item.product.id),
           name: item.product.name,
@@ -938,6 +939,7 @@ export default function Home() {
         delivery_fee: deliveryFee,
         discount: subscriptionDiscount + voucherDiscount,
         total: grandTotal,
+        payment_method: 'card',
         items: cart.map(item => ({
           product_id: Number(item.product.id),
           name: item.product.name,
@@ -1036,7 +1038,7 @@ export default function Home() {
   };
 
   // Final checkout logic
-  const executeFinalCheckout = (addPastry: boolean) => {
+  const executeFinalCheckout = async (addPastry: boolean) => {
     closeUpsell();
     let finalTotal = grandTotal;
     
@@ -1092,18 +1094,6 @@ export default function Home() {
         showAlert('Insufficient Funds', 'Your wallet balance is too low. Please top up before checking out.');
         return;
       }
-      setWalletBalance(walletBalance - finalTotal);
-      if (drinksCovered > 0) {
-        showAlert(
-          'Checkout Complete! 🎉',
-          `${drinksCovered} drinks redeemed from Subscription.\n₱${finalTotal.toFixed(2)} charged to Lesh Wallet.`
-        );
-      } else {
-        showAlert(
-          'Order Placed! ☕',
-          `Successfully purchased! ₱${finalTotal.toFixed(2)} has been charged to your Lesh Digital Wallet.`
-        );
-      }
     } else if (paymentMethod === 'CardEWallet') {
       if (drinksCovered > 0) {
         showAlert(
@@ -1134,8 +1124,8 @@ export default function Home() {
 
     addOrderLocal(newOrder);
 
-    // Sync order to backend
-    createOrder({
+    // Send order to backend — for wallet payments, server debits the wallet
+    const orderResult = await createOrder({
       order_number: newOrder.id,
       fulfillment: newOrder.fulfillment,
       table_no: newOrder.tableNo,
@@ -1144,6 +1134,7 @@ export default function Home() {
       delivery_fee: newOrder.deliveryFee,
       discount: newOrder.discount,
       total: newOrder.total,
+      payment_method: paymentMethod === 'Wallet' ? 'wallet' : paymentMethod === 'CardEWallet' ? 'card' : 'COD',
       items: cart.map(item => ({
         product_id: Number(item.product.id),
         name: item.product.name,
@@ -1151,7 +1142,23 @@ export default function Home() {
         price: item.product.price,
         customization: item.customization
       }))
-    }).catch(err => console.warn('Failed to sync wallet/card order to backend:', err));
+    });
+
+    // Handle wallet payment result
+    if (paymentMethod === 'Wallet') {
+      if (orderResult) {
+        // Server debited successfully — update local balance
+        setWalletBalance(walletBalance - finalTotal);
+        showAlert(
+          'Order Placed! ☕',
+          `₱${finalTotal.toFixed(2)} has been charged to your Lesh Digital Wallet.`
+        );
+      } else {
+        // Server debit failed — show error, don't clear cart
+        showAlert('Payment Failed', 'Could not process wallet payment. Please try again.');
+        return;
+      }
+    }
 
     if (drinksCovered > 0) {
       setSubscriptionBalance(subscriptionBalance - drinksCovered);

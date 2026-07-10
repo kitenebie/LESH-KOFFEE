@@ -33,7 +33,7 @@ export const login = async (email: string, password: string): Promise<{ success:
     const { data } = await api.post('/auth/login', { email, password });
 
     // On success, save user session + token to SQLite
-    if (data?.data?.user && data?.data?.token) {
+    if (data?.data?.user && data?.data?.token && typeof data.data.token === 'string') {
       const user = data.data.user;
       const token = data.data.token;
 

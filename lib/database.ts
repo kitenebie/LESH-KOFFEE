@@ -27,10 +27,17 @@ export async function initDatabase(): Promise<void> {
     console.warn('[SQLite] Failed to check/migrate product_customizations table:', err);
   }
 
+  // Migrate auth_tokens: drop and recreate to ensure correct schema
+  try {
+    await database.execAsync('DROP TABLE IF EXISTS auth_tokens;');
+  } catch (err) {
+    console.warn('[SQLite] Failed to drop auth_tokens table:', err);
+  }
+
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS auth_tokens (
       id INTEGER PRIMARY KEY,
-      token TEXT NOT NULL
+      token TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS users (

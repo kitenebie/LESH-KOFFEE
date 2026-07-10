@@ -10,7 +10,6 @@ import Animated, {
 import { Button } from '../../../components/UI/Button';
 import { Colors } from '../../../components/UI/Colors';
 import { Input } from '../../../components/UI/Input';
-import { loginUser } from '../../../lib/authSession';
 import { login } from '../../../services/authService';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
@@ -46,21 +45,7 @@ export default function Login() {
       const result = await login(email.trim(), password);
 
       if (result.success && result.data?.user) {
-        const user = result.data.user;
-
-        // Save session to SQLite
-        await loginUser({
-          id: user.id.toString(),
-          name: user.name,
-          firstName: user.first_name || user.name.split(' ')[0],
-          email: user.email,
-          phone: user.phone || '',
-          avatar: user.avatar || '',
-          memberLevel: user.member_level || 'Silver',
-          memberLevelLabel: user.member_level_label || 'Lesh Kaffe Silver Member',
-        });
-
-        // Navigate to Home
+        // authService.login() already saves session + token to SQLite
         router.replace('/views/Home/Index');
       } else {
         setError(result.message || 'Invalid email or password.');
