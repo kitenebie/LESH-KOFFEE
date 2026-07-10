@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "299834357585",
+    "project_id": "lesh-677d5",
+    "storage_bucket": "lesh-677d5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:299834357585:android:743a60bd8e45561a620570",
+        "android_client_info": {
+          "package_name": "com.kennethgimpao22.LeshKeffe"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtCjPQaYL8jgXP1pF91vfG1udy8MS-xGw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
