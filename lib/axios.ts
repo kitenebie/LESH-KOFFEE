@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getLoggedInUser } from './authSession';
+import { getAuthToken } from './authSession';
 
 const BASE_URL = 'http://s1102464823.onlinehome.us/api';
 
@@ -12,16 +12,16 @@ const api = axios.create({
   },
 });
 
-// Request interceptor — attaches user ID from SQLite session
+// Request interceptor — attaches Bearer token from SQLite session
 api.interceptors.request.use(
   async (config) => {
     try {
-      const user = await getLoggedInUser();
-      if (user?.id) {
-        config.headers['X-User-Id'] = user.id;
+      const token = await getAuthToken();
+      if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
       }
     } catch (err) {
-      // Silently fail — requests without user ID will be treated as guest
+      // Silently fail — requests without token will get 401 from protected routes
     }
     return config;
   },
@@ -37,7 +37,11 @@ api.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          // Handle unauthorized
+          // Token expired or invalid — user should re-login
+          // Could trigger a global logout event here
+          break;
+        case 429:
+          // Rate limited — retry after delay
           break;
         case 500:
           // Handle server error

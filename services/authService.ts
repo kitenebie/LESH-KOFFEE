@@ -1,5 +1,5 @@
 import api from '../lib/axios';
-import { loginUser, logoutUser } from '../lib/authSession';
+import { loginUser, logoutUser, clearAuthToken } from '../lib/authSession';
 
 export interface LoginResponse {
   user: {
@@ -17,6 +17,7 @@ export interface LoginResponse {
     stamps_required: number;
     joined_date: string;
   };
+  token: string;
 }
 
 export interface RegisterData {
@@ -31,9 +32,11 @@ export const login = async (email: string, password: string): Promise<{ success:
   try {
     const { data } = await api.post('/auth/login', { email, password });
 
-    // On success, save user session to SQLite
-    if (data?.data?.user) {
+    // On success, save user session + token to SQLite
+    if (data?.data?.user && data?.data?.token) {
       const user = data.data.user;
+      const token = data.data.token;
+
       await loginUser({
         id: user.id.toString(),
         name: user.name,
@@ -43,7 +46,7 @@ export const login = async (email: string, password: string): Promise<{ success:
         avatar: user.avatar || '',
         memberLevel: user.member_level || 'Silver',
         memberLevelLabel: user.member_level_label || 'Lesh Kaffe Silver Member',
-      });
+      }, token);
     }
 
     return { success: true, data: data.data };
@@ -57,9 +60,11 @@ export const register = async (userData: RegisterData): Promise<{ success: boole
   try {
     const { data } = await api.post('/auth/register', userData);
 
-    // On success, save user session to SQLite
-    if (data?.data?.user) {
+    // On success, save user session + token to SQLite
+    if (data?.data?.user && data?.data?.token) {
       const user = data.data.user;
+      const token = data.data.token;
+
       await loginUser({
         id: user.id.toString(),
         name: user.name,
@@ -69,7 +74,7 @@ export const register = async (userData: RegisterData): Promise<{ success: boole
         avatar: user.avatar || '',
         memberLevel: user.member_level || 'Silver',
         memberLevelLabel: user.member_level_label || 'Lesh Kaffe Silver Member',
-      });
+      }, token);
     }
 
     return { success: true, data: data.data };
@@ -81,11 +86,12 @@ export const register = async (userData: RegisterData): Promise<{ success: boole
 
 export const logout = async (): Promise<void> => {
   try {
+    // Call server to revoke the token
     await api.post('/auth/logout');
   } catch (error) {
     // Silently fail — local logout is more important
   }
 
-  // Always clear SQLite session regardless of API response
+  // Always clear SQLite session + token regardless of API response
   await logoutUser();
 };

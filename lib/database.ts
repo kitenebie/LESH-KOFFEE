@@ -28,6 +28,11 @@ export async function initDatabase(): Promise<void> {
   }
 
   await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+      id INTEGER PRIMARY KEY,
+      token TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT,
