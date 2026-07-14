@@ -8,6 +8,10 @@ import { Input } from '../UI/Input';
 interface StepContactProps {
   email: string;
   setEmail: (text: string) => void;
+  password: string;
+  setPassword: (text: string) => void;
+  confirmPassword: string;
+  setConfirmPassword: (text: string) => void;
   phone: string;
   setPhone: (text: string) => void;
   errors: { [key: string]: string };
@@ -19,6 +23,10 @@ interface StepContactProps {
 export const StepContact: React.FC<StepContactProps> = ({
   email,
   setEmail,
+  password,
+  setPassword,
+  confirmPassword,
+  setConfirmPassword,
   phone,
   setPhone,
   errors,
@@ -41,6 +49,34 @@ export const StepContact: React.FC<StepContactProps> = ({
         }}
         error={errors.email}
         leftIcon={<Ionicons name="mail-outline" size={20} color={Colors.primary.default} />}
+      />
+
+      <Input
+        label="Password"
+        placeholder="Create a password"
+        required
+        secureTextEntry
+        value={password}
+        onChangeText={(text) => {
+          setPassword(text);
+          if (errors.password) setErrors((prev) => ({ ...prev, password: '' }));
+        }}
+        error={errors.password}
+        leftIcon={<Ionicons name="lock-closed-outline" size={20} color={Colors.primary.default} />}
+      />
+
+      <Input
+        label="Confirm Password"
+        placeholder="Re-enter your password"
+        required
+        secureTextEntry
+        value={confirmPassword}
+        onChangeText={(text) => {
+          setConfirmPassword(text);
+          if (errors.confirmPassword) setErrors((prev) => ({ ...prev, confirmPassword: '' }));
+        }}
+        error={errors.confirmPassword}
+        leftIcon={<Ionicons name="lock-closed-outline" size={20} color={Colors.primary.default} />}
       />
 
       <Input

@@ -1,5 +1,25 @@
 import api from '../lib/axios';
 
+/**
+ * POST /api/wallet/transfer
+ * Send Lesh Money to another user by mobile number.
+ * Uses atomic DB transaction with row locking on the server.
+ */
+export const transferMoney = async (
+  phone: string,
+  amount: number,
+  note?: string
+): Promise<{ success: boolean; message: string; data?: { reference_code: string; new_balance: number; recipient_name: string } }> => {
+  try {
+    const { data } = await api.post('/wallet/transfer', { phone, amount, note: note || '' });
+    return { success: true, message: data.message, data: data.data };
+  } catch (error: any) {
+    const message = error?.response?.data?.message || 'Transfer failed. Please try again.';
+    return { success: false, message };
+  }
+};
+
+
 export interface WalletTransaction {
   id: number;
   type: 'credit' | 'debit';

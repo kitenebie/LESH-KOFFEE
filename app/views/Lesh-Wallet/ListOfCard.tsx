@@ -18,17 +18,36 @@ const { height } = Dimensions.get('window');
 interface ListOfCardProps {
   visible: boolean;
   onClose: () => void;
-  selectedTier: 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
+  selectedTier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
   tierConfig: any;
+  leshAcc?: string | null;
+  leshExp?: string | null;
+  userName?: string;
 }
 
 export default function ListOfCard({
   visible,
   onClose,
   selectedTier,
-  tierConfig
+  tierConfig,
+  leshAcc,
+  leshExp,
+  userName,
 }: ListOfCardProps) {
   const translateY = useRef(new Animated.Value(height)).current;
+
+  // Determine tier rank for locked/unlocked/current status
+  const tierRanks: Record<string, number> = { Bronze: 1, Silver: 2, Gold: 3, Platinum: 4, Diamond: 5 };
+  const currentRank = tierRanks[selectedTier] || 1;
+
+  const getStatusText = (tier: string): string => {
+    const rank = tierRanks[tier] || 1;
+    if (rank === currentRank) return `${tier} Tier - Active (Current Tier)`;
+    if (rank < currentRank) return `${tier} Tier - Unlocked`;
+    return `${tier} Tier - Locked`;
+  };
+
+  const isLocked = (tier: string): boolean => (tierRanks[tier] || 1) > currentRank;
 
   useEffect(() => {
     Animated.spring(translateY, {
@@ -67,36 +86,59 @@ export default function ListOfCard({
           Tap any virtual membership card below to flip and inspect credentials. Tiers unlock automatically based on your order activity and loyalty status.
         </Text>
 
+        {/* Bronze Card (Default) */}
+        <LoyalCard 
+          selectedTier="Bronze" 
+          tierConfig={tierConfig} 
+          isLocked={isLocked('Bronze')} 
+          statusText={getStatusText('Bronze')}
+          leshAcc={leshAcc}
+          leshExp={leshExp}
+          userName={userName}
+        />
+
         {/* Silver Card */}
         <LoyalCard 
           selectedTier="Silver" 
           tierConfig={tierConfig} 
-          isLocked={false} 
-          statusText="Silver Tier - Unlocked"
+          isLocked={isLocked('Silver')} 
+          statusText={getStatusText('Silver')}
+          leshAcc={leshAcc}
+          leshExp={leshExp}
+          userName={userName}
         />
 
         {/* Gold Card */}
         <LoyalCard 
           selectedTier="Gold" 
           tierConfig={tierConfig} 
-          isLocked={false} 
-          statusText="Gold Tier - Active (Current Tier)"
+          isLocked={isLocked('Gold')} 
+          statusText={getStatusText('Gold')}
+          leshAcc={leshAcc}
+          leshExp={leshExp}
+          userName={userName}
         />
 
         {/* Platinum Card */}
         <LoyalCard 
           selectedTier="Platinum" 
           tierConfig={tierConfig} 
-          isLocked={true} 
-          statusText="Platinum Tier - Locked (Earn at 20 stamps)"
+          isLocked={isLocked('Platinum')} 
+          statusText={getStatusText('Platinum')}
+          leshAcc={leshAcc}
+          leshExp={leshExp}
+          userName={userName}
         />
 
         {/* Diamond Card */}
         <LoyalCard 
           selectedTier="Diamond" 
           tierConfig={tierConfig} 
-          isLocked={true} 
-          statusText="Diamond Tier - Locked (Earn at 50 stamps)"
+          isLocked={isLocked('Diamond')} 
+          statusText={getStatusText('Diamond')}
+          leshAcc={leshAcc}
+          leshExp={leshExp}
+          userName={userName}
         />
       </ScrollView>
     </Animated.View>

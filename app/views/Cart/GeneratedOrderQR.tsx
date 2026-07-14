@@ -13,14 +13,24 @@ import { Colors } from '../../../components/UI/Colors';
 
 interface GeneratedOrderQRProps {
   order: {
-    id: string;
-    tableNo: string;
-    lineItems: { name: string; qty: number; price: number }[];
+    order_number: string;
+    user_id: number;
+    createdAt?: string; // ISO timestamp for timer persistence
+    fulfillment: 'DineIn' | 'Delivery';
+    ref_no: string | null; // table number
+    payment_method: string;
+    items: {
+      product_id: number;
+      name: string;
+      quantity: number;
+      price: number;
+      customization?: any;
+    }[];
+    subtotal: number;
+    delivery_fee: number;
+    discount: number;
     total: number;
-    subtotal?: number;
-    deliveryFee?: number;
-    discount?: number;
-    voucherCode?: string | null;
+    voucherCode?: string | null; // for server-side re-validation
     voucherDiscount?: number;
     subscriptionDiscount?: number;
   };
@@ -28,7 +38,37 @@ interface GeneratedOrderQRProps {
 }
 
 export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProps) {
-  const [timeLeft, setTimeLeft] = useState(900); // 15 mins in seconds
+  // QR version for format validation on scanner side
+  const QR_VERSION = 1;
+
+  // Normalize legacy orders that may still be stored in SQLite with old field names
+  const normalizedOrder = {
+    ...order,
+    order_number: order.order_number || (order as any).id || '',
+    user_id: order.user_id ?? (order as any).user_id ?? 0,
+    ref_no: order.ref_no ?? (order as any).tableNo ?? null,
+    payment_method: order.payment_method || (order as any).payment_method || 'cash',
+    items: order.items || ((order as any).lineItems || []).map((li: any) => ({
+      product_id: li.product_id || 0,
+      name: li.name,
+      quantity: li.quantity ?? li.qty ?? 1,
+      price: li.price,
+      customization: li.customization ?? null,
+    })),
+    delivery_fee: order.delivery_fee ?? (order as any).deliveryFee ?? 0,
+  };
+
+  // Calculate time left based on creation time (persists through app restarts)
+  const getInitialTimeLeft = () => {
+    if (normalizedOrder.createdAt) {
+      const elapsed = Math.floor((Date.now() - new Date(normalizedOrder.createdAt).getTime()) / 1000);
+      const remaining = 3600 - elapsed; // 1 hour = 3600 sec
+      return remaining > 0 ? remaining : 0;
+    }
+    return 3600;
+  };
+
+  const [timeLeft, setTimeLeft] = useState(getInitialTimeLeft);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -42,6 +82,28 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
     const s = (secs % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
+
+  // QR payload — matches Order model fields in LeshServer exactly
+  const qrPayload = JSON.stringify({
+    v: QR_VERSION, // version for future-proofing format validation
+    order_number: normalizedOrder.order_number,
+    user_id: normalizedOrder.user_id,
+    fulfillment: normalizedOrder.fulfillment,
+    ref_no: normalizedOrder.ref_no,
+    payment_method: normalizedOrder.payment_method,
+    items: normalizedOrder.items.map((item) => ({
+      product_id: item.product_id,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      customization: item.customization ?? null,
+    })),
+    subtotal: normalizedOrder.subtotal,
+    delivery_fee: normalizedOrder.delivery_fee,
+    discount: normalizedOrder.discount,
+    voucherCode: normalizedOrder.voucherCode ?? null,
+    total: normalizedOrder.total,
+  });
 
   return (
     <View style={styles.container}>
@@ -69,36 +131,23 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
           </View>
 
           {/* Table Badge */}
-          <View style={styles.tableBadge}>
-            <Text style={styles.tableBadgeText}>TABLE NO. {order.tableNo}</Text>
+          {normalizedOrder.ref_no && <View style={styles.tableBadge}>
+            <Text style={styles.tableBadgeText}>TABLE NO. {normalizedOrder.ref_no}</Text>
           </View>
+          }
 
           {/* QR Code Graphic Section */}
           <View style={styles.qrSection}>
             {/* Styled QR frame */}
             <View style={styles.qrBorder}>
               <QRCode
-                value={JSON.stringify({
-                  id: order.id,
-                  tableNo: order.tableNo,
-                  items: order.lineItems.map((item) => ({
-                    name: item.name,
-                    qty: item.qty,
-                    price: item.price,
-                  })),
-                  subtotal: order.subtotal,
-                  deliveryFee: order.deliveryFee,
-                  subscriptionDiscount: order.subscriptionDiscount,
-                  voucherDiscount: order.voucherDiscount,
-                  voucherCode: order.voucherCode,
-                  total: order.total,
-                })}
+                value={qrPayload}
                 size={140}
                 color={Colors.primary.default}
                 backgroundColor="#FAF9F5"
               />
             </View>
-            <Text style={styles.ticketId}>{order.id}</Text>
+            <Text style={styles.ticketId}>{normalizedOrder.order_number}</Text>
             
             <View style={styles.timerContainer}>
               <Ionicons name="time-outline" size={14} color={Colors.danger.default} />
@@ -112,45 +161,65 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
           {/* Order Summary list inside Ticket */}
           <View style={styles.summarySection}>
             <Text style={styles.sectionTitle}>Order Summary</Text>
-            {order.lineItems.map((item, idx) => (
+            {normalizedOrder.items.map((item, idx) => (
               <View key={idx} style={styles.itemRow}>
-                <Text style={styles.itemQty}>{item.qty}x</Text>
+                <Text style={styles.itemQty}>{item.quantity}x</Text>
                 <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.itemPrice}>₱{(item.price * item.qty).toFixed(2)}</Text>
+                <Text style={styles.itemPrice}>₱{(item.price * item.quantity).toFixed(2)}</Text>
               </View>
             ))}
 
-            {order.subtotal !== undefined && (
+            {normalizedOrder.subtotal > 0 && (
               <View style={[styles.summaryMetaRow, { marginTop: 12, borderTopWidth: 1, borderTopColor: Colors.neutral.gray200, paddingTop: 8 }]}>
                 <Text style={styles.summaryMetaLabel}>Subtotal</Text>
-                <Text style={styles.summaryMetaVal}>₱{order.subtotal.toFixed(2)}</Text>
+                <Text style={styles.summaryMetaVal}>₱{normalizedOrder.subtotal.toFixed(2)}</Text>
               </View>
             )}
 
-            {order.deliveryFee !== undefined && order.deliveryFee > 0 && (
+            {normalizedOrder.delivery_fee > 0 && (
               <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Delivery Fee</Text>
-                <Text style={styles.summaryMetaVal}>₱{order.deliveryFee.toFixed(2)}</Text>
+                <Text style={styles.summaryMetaVal}>₱{normalizedOrder.delivery_fee.toFixed(2)}</Text>
               </View>
             )}
 
-            {order.subscriptionDiscount !== undefined && order.subscriptionDiscount > 0 && (
+            {normalizedOrder.subscriptionDiscount !== undefined && normalizedOrder.subscriptionDiscount > 0 && (
               <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Subscription Discount</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{order.subscriptionDiscount.toFixed(2)}</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.subscriptionDiscount.toFixed(2)}</Text>
               </View>
             )}
 
-            {order.voucherCode && order.voucherDiscount !== undefined && order.voucherDiscount > 0 && (
+            {normalizedOrder.voucherCode && normalizedOrder.voucherDiscount !== undefined && normalizedOrder.voucherDiscount > 0 && (
               <View style={styles.summaryMetaRow}>
-                <Text style={styles.summaryMetaLabel}>Voucher ({order.voucherCode})</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{order.voucherDiscount.toFixed(2)}</Text>
+                <Text style={styles.summaryMetaLabel}>Voucher ({normalizedOrder.voucherCode})</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.voucherDiscount.toFixed(2)}</Text>
               </View>
             )}
 
-            <View style={[styles.totalRow, order.subtotal === undefined && { borderTopWidth: 1 }]}>
+            {(normalizedOrder as any).perkDiscount > 0 && (
+              <View style={styles.summaryMetaRow}>
+                <Text style={styles.summaryMetaLabel}>Subscriber Perk</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{(normalizedOrder as any).perkDiscount.toFixed(2)}</Text>
+              </View>
+            )}
+
+            {/* Show discount line — when discount exists */}
+            {normalizedOrder.discount > 0 &&
+              !(normalizedOrder.subscriptionDiscount > 0) && !(normalizedOrder.voucherDiscount > 0) && (
+              <View style={styles.summaryMetaRow}>
+                <Text style={styles.summaryMetaLabel}>Discount</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.discount.toFixed(2)}</Text>
+              </View>
+            )}
+
+            <View style={[styles.totalRow, normalizedOrder.subtotal === undefined && { borderTopWidth: 1 }]}>
               <Text style={styles.totalLabel}>Grand Total</Text>
-              <Text style={styles.totalVal}>₱{order.total.toFixed(2)}</Text>
+              <Text style={[styles.totalVal, normalizedOrder.total === 0 && { color: '#4CAF50' }]}>
+                {normalizedOrder.total === 0 && normalizedOrder.payment_method === 'subscription'
+                  ? 'FREE ☕'
+                  : `₱${normalizedOrder.total.toFixed(2)}`}
+              </Text>
             </View>
           </View>
         </View>

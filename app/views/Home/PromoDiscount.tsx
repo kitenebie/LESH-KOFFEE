@@ -27,18 +27,34 @@ interface Promo {
   image: string;
 }
 
+interface Voucher {
+  id: string | number;
+  code: string;
+  discount: number;
+  label: string;
+  type: 'percent' | 'fixed';
+  min_order_amount?: number;
+  max_discount?: number;
+}
+
 interface PromoDiscountProps {
   promos: Promo[];
+  claimedVoucherCodes?: string[];
+  vouchers?: Voucher[];
   onBack: () => void;
   onSendGift: () => void;
   showAlert: (title: string, message: string) => void;
 }
 
-export default function PromoDiscount({ promos, onBack, onSendGift, showAlert }: PromoDiscountProps) {
+export default function PromoDiscount({ promos, claimedVoucherCodes = [], vouchers = [], onBack, onSendGift, showAlert }: PromoDiscountProps) {
   const handleCopyCode = (code: string) => {
     Clipboard.setString(code);
     showAlert('Code Copied! 🎟️', `Promo code "${code}" has been copied to your clipboard.`);
   };
+
+  // Get promo codes so we can filter out vouchers already linked to promos
+  const promoCodes = promos.map(p => p.code);
+  const standaloneVouchers = vouchers.filter(v => !promoCodes.includes(v.code));
 
   return (
     <Animated.View entering={SlideInDown.duration(400)} style={styles.container}>
@@ -53,11 +69,12 @@ export default function PromoDiscount({ promos, onBack, onSendGift, showAlert }:
 
       <FlatList
         data={promos}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => String(item.id)}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listBody}
         renderItem={({ item, index }) => {
           const isGiftCard = item.id === 'pr3';
+          const isClaimed = claimedVoucherCodes.includes(item.code);
 
           return (
             <Animated.View
@@ -68,6 +85,16 @@ export default function PromoDiscount({ promos, onBack, onSendGift, showAlert }:
               }
             >
             <View style={[styles.promoCardContainer, { backgroundColor: item.color }]}>
+              {/* Claimed/Claim Badge */}
+              {!isGiftCard && (
+                <View style={[styles.claimBadge, isClaimed ? styles.claimBadgeClaimed : styles.claimBadgeUnclaimed]}>
+                  {isClaimed ? (
+                    <><Ionicons name="checkmark-circle" size={10} color="#FFF" /><Text style={styles.claimBadgeText}> Claimed</Text></>
+                  ) : (
+                    <><Ionicons name="pricetag" size={10} color="#FFF" /><Text style={styles.claimBadgeText}> Claim</Text></>
+                  )}
+                </View>
+              )}
               {/* Left Side */}
               <View style={styles.promoCardLeft}>
                 <View>
@@ -124,6 +151,72 @@ export default function PromoDiscount({ promos, onBack, onSendGift, showAlert }:
             </Animated.View>
           );
         }}
+        ListFooterComponent={standaloneVouchers.length > 0 ? () => (
+          <View style={{ marginTop: 10 }}>
+            <Text style={styles.voucherSectionTitle}>Vouchers</Text>
+            {standaloneVouchers.map((v, idx) => {
+              const voucherColors = ['#5B8A72', '#C67B5C', '#6B5CA5', Colors.secondary.default];
+              const bgColor = voucherColors[idx % voucherColors.length];
+              const isClaimed = claimedVoucherCodes.includes(v.code);
+              const discountText = v.type === 'percent'
+                ? `${(v.discount * 100).toFixed(0)}% OFF`
+                : `₱${Number(v.discount).toFixed(0)} OFF`;
+
+              return (
+                <Animated.View
+                  key={`voucher-${v.id || v.code}-${idx}`}
+                  entering={
+                    idx % 2 === 0
+                      ? SlideInLeft.delay(300 + idx * 100).duration(400)
+                      : SlideInRight.delay(300 + idx * 100).duration(400)
+                  }
+                >
+                  <View style={[styles.promoCardContainer, { backgroundColor: bgColor }]}>
+                    {/* Claimed Badge */}
+                    {isClaimed && (
+                      <View style={[styles.claimBadge, styles.claimBadgeClaimed]}>
+                        <Ionicons name="checkmark-circle" size={10} color="#FFF" />
+                        <Text style={styles.claimBadgeText}> Claimed</Text>
+                      </View>
+                    )}
+                    {!isClaimed && (
+                      <View style={[styles.claimBadge, styles.claimBadgeUnclaimed]}>
+                        <Ionicons name="pricetag" size={10} color="#FFF" />
+                        <Text style={styles.claimBadgeText}> Claim</Text>
+                      </View>
+                    )}
+                    <View style={styles.promoCardLeft}>
+                      <View>
+                        <Text style={styles.promoCardHeading}>{v.label}</Text>
+                        <Text style={styles.promoCardSubheading}>
+                          {discountText}{v.min_order_amount ? ` • Min ₱${v.min_order_amount}` : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.promoPill}
+                        onPress={() => handleCopyCode(v.code)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.promoPillLabel}><Text style={styles.promoPillLabelText}>tap to copy</Text></View>
+                        <View style={styles.promoPillValue}>
+                          <Text style={styles.promoPillValueText}>{v.code}</Text>
+                          <Ionicons name="copy-outline" size={10} color={bgColor} style={{ marginLeft: 4 }} />
+                        </View>
+                      </TouchableOpacity>
+                      <Text style={styles.promoCardFootnote}>Terms & Conditions apply.</Text>
+                    </View>
+                    <View style={styles.promoCardRight}>
+                      <View style={styles.promoImageBgShape} />
+                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                        <Ionicons name="pricetag" size={48} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    </View>
+                  </View>
+                </Animated.View>
+              );
+            })}
+          </View>
+        ) : null}
       />
     </Animated.View>
   );
@@ -173,6 +266,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 3,
+  },
+  claimBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    zIndex: 10,
+  },
+  claimBadgeClaimed: {
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+  },
+  claimBadgeUnclaimed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  claimBadgeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#FFF',
   },
   promoCardLeft: {
     flex: 1.2,
@@ -280,5 +395,12 @@ const styles = StyleSheet.create({
   promoProductImage: {
     width: '100%',
     height: '100%',
+  },
+  voucherSectionTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: Colors.primary.default,
+    marginBottom: 14,
+    marginTop: 6,
   },
 });

@@ -7,7 +7,7 @@ import * as db from './database';
 import { getTransactions as getLoyaltyTransactions } from '../services/loyaltyService';
 import { getNotifications } from '../services/notificationsService';
 import { getOrders } from '../services/ordersService';
-import { getStamps } from '../services/stampsService';
+import { getStamps, getQuotaProgress } from '../services/stampsService';
 import { getAddresses, getProfile } from '../services/userService';
 import { getVouchers } from '../services/vouchersService';
 import { getWallet } from '../services/walletService';
@@ -28,6 +28,7 @@ export interface AppData {
   subscriptions: any[];
   promos: any[];
   customizationOptions: Record<string, any>;
+  stampQuota: { tier: any | null; requirements: any[] };
 }
 
 // ─── Default empty data ─────────────────────────────────────────────────────
@@ -36,7 +37,7 @@ const PLACEHOLDER_AVATAR = 'https://ui-avatars.com/api/?name=U&background=F3F0E6
 const EMPTY_DATA: AppData = {
   user: {
     id: '', name: 'Loading...', firstName: '', email: '', phone: '',
-    avatar: PLACEHOLDER_AVATAR, memberLevel: 'Silver', memberLevelLabel: 'Lesh Kaffe Silver Member',
+    avatar: PLACEHOLDER_AVATAR, memberLevel: 'Bronze', memberLevelLabel: 'Lesh Kaffe Bronze Member',
     walletBalance: 0, loyaltyPoints: 0, stampsCollected: 0, stampsRequired: 8,
     subscriptionBalance: 0, activeSubscription: null, joinedDate: '',
     tableNo: '', cashier: '', location: { latitude: 0, longitude: 0 }, addresses: [],
@@ -62,13 +63,14 @@ const EMPTY_DATA: AppData = {
   subscriptions: [],
   promos: [],
   customizationOptions: {},
+  stampQuota: { tier: null, requirements: [] },
 };
 
 // ─── Transform API data to AppData format ───────────────────────────────────
 function transformApiData(raw: {
   user: any; addresses: any; products: any; categories: any;
   orders: any; wallet: any; loyalty: any; notifications: any;
-  stamps: any; promos: any; subscriptions: any; store: any; vouchers: any;
+  stamps: any; promos: any; subscriptions: any; store: any; vouchers: any; stampQuota: any;
 }): AppData {
   const user = raw.user ? {
     id: raw.user.id?.toString() || '',
@@ -77,15 +79,19 @@ function transformApiData(raw: {
     email: raw.user.email || '',
     phone: raw.user.phone || '',
     avatar: raw.user.avatar || '',
-    memberLevel: raw.user.member_level || 'Silver',
-    memberLevelLabel: raw.user.member_level_label || 'Lesh Kaffe Silver Member',
-    walletBalance: Number(raw.user.wallet_balance) || 0,
+    memberLevel: raw.user.member_level || 'Bronze',
+    memberLevelLabel: raw.user.member_level_label || 'Lesh Kaffe Bronze Member',
+    walletBalance: 0, // Deprecated — real balance comes from dummyData.wallet.balance (LeshWallet model)
     loyaltyPoints: Number(raw.user.loyalty_points) || 0,
     stampsCollected: Number(raw.user.stamps_collected) || 0,
     stampsRequired: Number(raw.user.stamps_required) || 8,
     subscriptionBalance: Number(raw.user.subscription_balance) || 0,
-    activeSubscription: raw.user.active_subscription || null,
+    activeSubscription: typeof raw.user.active_subscription === 'object' ? (raw.user.active_subscription?.name || raw.user.active_subscription?.id?.toString() || null) : (raw.user.active_subscription || null),
+    activeSubscriptionId: raw.user.active_subscription_id || (typeof raw.user.active_subscription === 'object' ? raw.user.active_subscription?.id : null) || null,
     joinedDate: raw.user.joined_date || '',
+    leshAcc: raw.user.lesh_acc || null,
+    leshExp: raw.user.lesh_exp || null,
+    role: raw.user.role || 'user',
     tableNo: raw.user.table_no || '04',
     cashier: raw.user.cashier || 'Maria A.',
     location: { latitude: raw.user.latitude || 0, longitude: raw.user.longitude || 0 },
@@ -165,7 +171,13 @@ function transformApiData(raw: {
   }));
 
   const globalVouchers = (raw.vouchers || []).map((v: any) => ({
-    code: v.code || '', discount: Number(v.discount) || 0, label: v.description || '', type: 'percent',
+    code: v.code || v.voucher?.code || '',
+    discount: Number(v.voucher?.discount ?? v.discount) || 0,
+    label: v.description || v.voucher?.label || '',
+    type: v.voucher?.type || v.type || 'percent',
+    min_order_amount: v.voucher?.min_order_amount ?? v.min_order_amount ?? null,
+    max_discount: v.voucher?.max_discount ?? v.max_discount ?? null,
+    id: v.voucher_id || v.id || '',
   }));
 
   const promos = (raw.promos || []).map((p: any) => ({
@@ -177,8 +189,21 @@ function transformApiData(raw: {
   }));
 
   const subscriptions = (raw.subscriptions || []).map((s: any) => ({
-    id: s.id?.toString() || '', name: s.name || '', description: s.description || '',
-    price: Number(s.price) || 0, drinks: s.drinks || 0, icon: s.icon || 'cafe-outline',
+    id: s.id?.toString() || '', name: s.name || '',
+    description: s.description || '',
+    price: Number(s.price) || 0,
+    items_per_week: Number(s.items_per_week || s.drinks_per_week || s.drinks) || 0,
+    items_limit: Number(s.items_limit || s.drinks || s.items_per_week) || 0,
+    expiration_days: Number(s.expiration_days) || 360,
+    icon: s.icon || 'cafe-outline',
+    perks: (s.perks || []).map((p: any) => ({
+      id: p.id,
+      category_id: p.category_id,
+      category_name: p.category?.name || '',
+      discount_type: p.discount_type || 'percent',
+      discount_value: Number(p.discount_value) || 0,
+      max_discount: p.max_discount ? Number(p.max_discount) : null,
+    })),
   }));
 
   const store = raw.store ? {
@@ -206,6 +231,10 @@ function transformApiData(raw: {
     orders, notifications,
     stamps: { collected: totalCollected, required: totalRequired, achievements, vouchers: stampVouchers },
     vouchers: globalVouchers, wallet, loyaltyTransactions, subscriptions, promos, customizationOptions,
+    stampQuota: raw.stampQuota ? {
+      tier: raw.stampQuota.tier || null,
+      requirements: raw.stampQuota.requirements || [],
+    } : EMPTY_DATA.stampQuota,
   };
 }
 
@@ -284,14 +313,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     let userRes: any = null, addressesRes: any = null, ordersRes: any = null;
     let walletRes: any = null, loyaltyRes: any = null, notificationsRes: any = null;
     let stampsRes: any = null, vouchersRes: any = null;
+    let stampQuotaRes: any = null;
 
     if (loggedIn) {
       const results = await Promise.allSettled([
         getProfile(), getAddresses(), getOrders(), getWallet(),
-        getLoyaltyTransactions(), getNotifications(), getStamps(), getVouchers(),
+        getLoyaltyTransactions(), getNotifications(), getStamps(), getVouchers(), getQuotaProgress(),
       ]);
       const get = (r: PromiseSettledResult<any>) => r.status === 'fulfilled' ? r.value : null;
-      [userRes, addressesRes, ordersRes, walletRes, loyaltyRes, notificationsRes, stampsRes, vouchersRes] =
+      [userRes, addressesRes, ordersRes, walletRes, loyaltyRes, notificationsRes, stampsRes, vouchersRes, stampQuotaRes] =
         results.map(get);
     }
 
@@ -303,6 +333,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       stamps: stampsRes, promos: publicData.promos,
       subscriptions: publicData.subscriptions, store: publicData.store,
       vouchers: vouchersRes,
+      stampQuota: stampQuotaRes,
     });
   }, []);
 
@@ -551,16 +582,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         `INSERT INTO orders (id, date, time, status, currentStep, fulfillment, tableNo, cashier, subtotal, deliveryFee, discount, total)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          order.id,
+          order.order_number || order.id,
           order.date,
           order.time,
           order.status,
           order.currentStep,
           order.fulfillment,
-          order.tableNo || null,
+          order.ref_no || order.tableNo || null,
           order.cashier || null,
           order.subtotal,
-          order.deliveryFee || 0,
+          order.delivery_fee ?? order.deliveryFee ?? 0,
           order.discount || 0,
           order.total
         ]

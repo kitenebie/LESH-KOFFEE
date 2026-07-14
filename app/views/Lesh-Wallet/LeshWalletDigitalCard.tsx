@@ -46,6 +46,7 @@ export default function LeshWalletDigitalCard({
           </View>
         </View>
       </View>
+
       <Text style={styles.walletTipText}>Load cash to check out with 1 click & earn double points!</Text>
     </View>
   );

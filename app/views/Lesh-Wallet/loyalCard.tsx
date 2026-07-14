@@ -9,17 +9,23 @@ import {
 } from 'react-native';
 
 interface LoyalCardProps {
-  selectedTier: 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
+  selectedTier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
   tierConfig: any;
   isLocked?: boolean;
   statusText?: string;
+  leshAcc?: string | null;
+  leshExp?: string | null;
+  userName?: string;
 }
 
 export default function LoyalCard({
   selectedTier,
   tierConfig,
   isLocked = false,
-  statusText
+  statusText,
+  leshAcc,
+  leshExp,
+  userName,
 }: LoyalCardProps) {
   const [isFlipped, setIsFlipped] = useState(false);
   const flipAnim = useRef(new Animated.Value(0)).current;
@@ -62,6 +68,15 @@ export default function LoyalCard({
   });
 
   const currentTier = tierConfig[selectedTier];
+
+  // Format card number for display (XXXX-XXXX-XXXX-XXXX → XXXX  XXXX  XXXX  XXXX)
+  const formattedCardNumber = leshAcc ? leshAcc.replace(/-/g, '  ') : '••••  ••••  ••••  ••••';
+  const lastFour = leshAcc ? leshAcc.slice(-4) : '••••';
+  const maskedCardNumber = `••••  ••••  ••••  ${lastFour}`;
+
+  // Use actual user data or fallbacks
+  const displayName = userName || 'CARDHOLDER';
+  const displayExp = leshExp || 'MM/YY';
 
   return (
     <View style={styles.outerWrapper}>
@@ -125,7 +140,7 @@ export default function LoyalCard({
             {/* 16-Digit ATM Card Number */}
             <View style={styles.cardNumberRow}>
               <Text style={styles.atmCardNumber}>
-                {showCardNumber ? '5482  1935  8824  0012' : '••••  ••••  ••••  0012'}
+                {showCardNumber ? formattedCardNumber : maskedCardNumber}
               </Text>
               <TouchableOpacity onPress={() => setShowCardNumber(!showCardNumber)} style={styles.eyeBtnFront}>
                 <Ionicons name={showCardNumber ? 'eye-outline' : 'eye-off-outline'} size={16} color={currentTier.borderColor} />
@@ -136,11 +151,11 @@ export default function LoyalCard({
             <View style={styles.atmFooter} pointerEvents="none">
               <View>
                 <Text style={styles.atmLabel}>CARDHOLDER</Text>
-                <Text style={styles.atmValueName}>KEN NARANJO</Text>
+                <Text style={styles.atmValueName}>{displayName.toUpperCase()}</Text>
               </View>
               <View style={styles.atmExpiryBlock}>
                 <Text style={styles.atmLabel}>GOOD THRU</Text>
-                <Text style={styles.atmValueDate}>12/31</Text>
+                <Text style={styles.atmValueDate}>{displayExp}</Text>
               </View>
               {/* Overlapping 2-Circle Union Design */}
               <View style={styles.atmUnionBadge}>
@@ -180,7 +195,7 @@ export default function LoyalCard({
             {/* Authorised Signature Strip & 3-digit CVV */}
             <View style={styles.signatureRow}>
               <View style={styles.signatureStrip} pointerEvents="none">
-                <Text style={styles.signatureSampleText}>Ken Naranjo</Text>
+                <Text style={styles.signatureSampleText}>{userName || 'Cardholder'}</Text>
               </View>
               <View style={styles.cvvStrip}>
                 <Text style={styles.cvvLabel}>CVV</Text>
@@ -198,18 +213,9 @@ export default function LoyalCard({
               <View style={styles.backCredentialItem}>
                 <Text style={styles.backLabel}>ACCOUNT NO.</Text>
                 <View style={styles.secureValueRow}>
-                  <Text style={styles.backVal}>{showAccountNo ? '1200 4821 9358' : '1200 •••• ••••'}</Text>
+                  <Text style={styles.backVal}>{showAccountNo ? (leshAcc || '—') : `${lastFour} •••• ••••`}</Text>
                   <TouchableOpacity onPress={() => setShowAccountNo(!showAccountNo)} style={styles.eyeBtnMini}>
                     <Ionicons name={showAccountNo ? 'eye-outline' : 'eye-off-outline'} size={14} color={currentTier.borderColor} style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.backCredentialItem}>
-                <Text style={styles.backLabel}>ATM PIN</Text>
-                <View style={styles.secureValueRow}>
-                  <Text style={styles.backVal}>{showAtmPin ? '8543' : '••••'}</Text>
-                  <TouchableOpacity onPress={() => setShowAtmPin(!showAtmPin)} style={styles.eyeBtnMini}>
-                    <Ionicons name={showAtmPin ? 'eye-outline' : 'eye-off-outline'} size={14} color={currentTier.borderColor} style={{ marginLeft: 8 }} />
                   </TouchableOpacity>
                 </View>
               </View>

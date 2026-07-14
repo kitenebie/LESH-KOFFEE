@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -18,8 +20,12 @@ import LeshWalletDigitalCard from './LeshWalletDigitalCard';
 import ListOfCard from './ListOfCard';
 import LoyalCard from './loyalCard';
 import Subscription from './Subscription';
+import SubscriptionQRCode from './SubscriptionQRCode';
+import SubscriptionRedeem from './SubscriptionRedeem';
 
 import { useAppData } from '../../../lib/useAppData';
+
+import { transferMoney } from '../../../services/walletService';
 
 interface WalletViewProps {
   walletBalance: number;
@@ -27,9 +33,22 @@ interface WalletViewProps {
   activeSubscription: string | null;
   subscriptionBalance: number;
   handleBuySubscription: (name: string, price: number, drinks: number, subscriptionId?: number) => void;
+  showAlert: (title: string, message: string) => void;
+  userSubscriptionId?: number;
+  onOrderGenerated?: (order: any) => void;
 }
 
 const tierConfig = {
+  Bronze: {
+    baseColor: '#2C2118',
+    borderColor: '#CD7F32',
+    accent1: '#8B4513',
+    accent2: '#CD7F32',
+    textColor: '#FAF9F5',
+    typeName: 'BRONZE DEBIT',
+    levelName: 'BRONZE MEMBER',
+  },
+
   Silver: {
     baseColor: '#3A3A3C',
     borderColor: '#C0C0C0',
@@ -39,6 +58,7 @@ const tierConfig = {
     typeName: 'SILVER DEBIT',
     levelName: 'SILVER MEMBER',
   },
+
   Gold: {
     baseColor: '#3F2F23',
     borderColor: '#D4AF37',
@@ -75,15 +95,83 @@ export default function WalletView({
   setShowTopUpModal,
   activeSubscription,
   subscriptionBalance,
-  handleBuySubscription
+  handleBuySubscription,
+  showAlert,
+  userSubscriptionId = 0,
+  onOrderGenerated,
 }: WalletViewProps) {
   const { data: dummyData } = useAppData();
 
-  const selectedTier = 'Gold';
+  const selectedTier = (dummyData?.user?.memberLevel as 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond') || 'Bronze';
+
+  // Override tier color from stamp_quota_categories.color (server-driven)
+  const serverTierColor = dummyData?.stampQuota?.tier?.color;
+  const activeTierConfig = serverTierColor
+    ? {
+        ...tierConfig[selectedTier],
+        borderColor: serverTierColor,
+        accent2: serverTierColor,
+      }
+    : tierConfig[selectedTier];
+
   const [showTierSelector, setShowTierSelector] = useState(false);
   const [activeWalletTab, setActiveWalletTab] = useState<WalletTab>('subscription');
   const [walletTxExpanded, setWalletTxExpanded] = useState(false);
   const [loyaltyTxExpanded, setLoyaltyTxExpanded] = useState(false);
+
+  // Send Money state
+  const [showSendMoney, setShowSendMoney] = useState(false);
+
+  // QR Code Redemption state
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [qrPlanId, setQrPlanId] = useState<number>(0);
+  const [qrPlanName, setQrPlanName] = useState<string>('');
+
+  const handleUseGiftCard = (planId: number, planName: string) => {
+    // Use the actual active_subscription_id from user data (DB truth), fallback to card planId
+    const actualPlanId = dummyData?.user?.activeSubscriptionId || planId;
+    setQrPlanId(Number(actualPlanId));
+    setQrPlanName(planName);
+    setShowQRCode(true);
+  };
+
+  const [sendPhone, setSendPhone] = useState('');
+  const [sendAmount, setSendAmount] = useState('');
+  const [sendNote, setSendNote] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  const handleSendMoney = async () => {
+    const amount = parseFloat(sendAmount);
+    const cleanPhone = sendPhone.replace(/[^0-9]/g, '');
+
+    if (!cleanPhone || cleanPhone.length < 10) {
+      showAlert('Invalid Number', 'Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (isNaN(amount) || amount < 1) {
+      showAlert('Invalid Amount', 'Please enter a valid amount (minimum ₱1).');
+      return;
+    }
+    if (amount > walletBalance) {
+      showAlert('Insufficient Balance', 'You don\'t have enough balance to send this amount.');
+      return;
+    }
+
+    setIsSending(true);
+    const fullPhone = `+63${cleanPhone}`;
+    const result = await transferMoney(fullPhone, amount, sendNote.trim() || undefined);
+    setIsSending(false);
+
+    if (result.success) {
+      setShowSendMoney(false);
+      setSendPhone('');
+      setSendAmount('');
+      setSendNote('');
+      showAlert('Money Sent! 💸', result.message);
+    } else {
+      showAlert('Transfer Failed', result.message);
+    }
+  };
 
   const walletTransactions = dummyData?.wallet?.transactions || [];
   const loyaltyTransactions = dummyData?.loyaltyTransactions || [];
@@ -97,12 +185,20 @@ export default function WalletView({
       <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.paddedHeader}>
         <View style={styles.pageHeaderRow}>
           <Text style={styles.tabTitle}>Lesh Wallet</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity 
+              style={styles.cardSelectIconBtn}
+              onPress={() => setShowSendMoney(true)}
+            >
+              <Ionicons name="send-outline" size={22} color={Colors.primary.default} />
+            </TouchableOpacity>
           <TouchableOpacity 
             style={styles.cardSelectIconBtn}
             onPress={() => setShowTierSelector(true)}
           >
             <Ionicons name="card-outline" size={26} color={Colors.primary.default} />
           </TouchableOpacity>
+          </View>
         </View>
       </Animated.View>
 
@@ -112,7 +208,13 @@ export default function WalletView({
       >
         {/* Flippable ATM Card — slides from LEFT to RIGHT */}
         <Animated.View entering={SlideInLeft.delay(300).duration(400)}>
-          <LoyalCard selectedTier={selectedTier} tierConfig={tierConfig} />
+          <LoyalCard
+            selectedTier={selectedTier}
+            tierConfig={{ ...tierConfig, [selectedTier]: activeTierConfig }}
+            leshAcc={dummyData?.user?.leshAcc}
+            leshExp={dummyData?.user?.leshExp}
+            userName={dummyData?.user?.name}
+          />
         </Animated.View>
 
         {/* Digital Wallet & Loyalty Points Card — slides from RIGHT to LEFT */}
@@ -164,6 +266,8 @@ export default function WalletView({
               activeSubscription={activeSubscription}
               subscriptionBalance={subscriptionBalance}
               onBuySubscription={handleBuySubscription}
+              onUseGiftCard={handleUseGiftCard}
+              plans={dummyData?.subscriptions || []}
             />
           </Animated.View>
         )}
@@ -257,7 +361,105 @@ export default function WalletView({
         onClose={() => setShowTierSelector(false)}
         selectedTier={selectedTier}
         tierConfig={tierConfig}
+        leshAcc={dummyData?.user?.leshAcc}
+        leshExp={dummyData?.user?.leshExp}
+        userName={dummyData?.user?.name}
       />
+
+      {/* Subscription QR Code Redemption Overlay */}
+      <SubscriptionRedeem
+        visible={showQRCode}
+        onClose={() => setShowQRCode(false)}
+        onOrderGenerated={(order) => {
+          setShowQRCode(false);
+          onOrderGenerated?.(order);
+        }}
+        userId={dummyData?.user?.id || ''}
+        planId={qrPlanId}
+        planName={qrPlanName}
+        itemsAvailable={subscriptionBalance}
+        subscriptionBalance={subscriptionBalance}
+      />
+
+      {/* Send Lesh Money Modal */}
+      <Modal visible={showSendMoney} animationType="slide" transparent={true}>
+        <View style={styles.sendMoneyOverlay}>
+          <View style={styles.sendMoneyContainer}>
+            <View style={styles.sendMoneyHeader}>
+              <Ionicons name="send" size={32} color={Colors.secondary.default} />
+              <Text style={styles.sendMoneyTitle}>Send Lesh Money</Text>
+              <Text style={styles.sendMoneySubtitle}>
+                Transfer funds to a friend's Lesh Digital Wallet
+              </Text>
+            </View>
+
+            <View style={styles.sendMoneyBody}>
+              <Text style={styles.sendMoneyLabel}>Recipient Mobile Number</Text>
+              <View style={styles.sendMoneyInputRow}>
+                <Text style={{ fontFamily: 'Poppins-SemiBold', fontSize: 14, color: Colors.primary.default, marginRight: 4 }}>+63</Text>
+                <View style={{ width: 1, height: 20, backgroundColor: Colors.neutral.gray300, marginRight: 8 }} />
+                <TextInput
+                  style={styles.sendMoneyInput}
+                  placeholder="9171234567"
+                  placeholderTextColor={Colors.neutral.gray400}
+                  value={sendPhone}
+                  onChangeText={(text) => setSendPhone(text.replace(/[^0-9]/g, ''))}
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                />
+              </View>
+
+              <Text style={styles.sendMoneyLabel}>Amount (₱)</Text>
+              <View style={styles.sendMoneyInputRow}>
+                <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 16, color: Colors.primary.default, marginRight: 4 }}>₱</Text>
+                <TextInput
+                  style={styles.sendMoneyInput}
+                  placeholder="0.00"
+                  placeholderTextColor={Colors.neutral.gray400}
+                  value={sendAmount}
+                  onChangeText={setSendAmount}
+                  keyboardType="numeric"
+                />
+              </View>
+              <Text style={styles.sendMoneyBalance}>
+                Available Balance: ₱{walletBalance.toFixed(2)}
+              </Text>
+
+              <Text style={styles.sendMoneyLabel}>Note (Optional)</Text>
+              <View style={styles.sendMoneyInputRow}>
+                <Ionicons name="chatbubble-outline" size={16} color={Colors.neutral.gray400} style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.sendMoneyInput}
+                  placeholder="e.g. Coffee treat! ☕"
+                  placeholderTextColor={Colors.neutral.gray400}
+                  value={sendNote}
+                  onChangeText={setSendNote}
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.sendMoneyBtn, isSending && { opacity: 0.6 }]}
+              onPress={handleSendMoney}
+              activeOpacity={0.85}
+              disabled={isSending}
+            >
+              {isSending
+                ? <Text style={styles.sendMoneyBtnText}>Sending...</Text>
+                : <><Ionicons name="paper-plane" size={16} color="#FFF" style={{ marginRight: 6 }} /><Text style={styles.sendMoneyBtnText}>Send Money</Text></>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.sendMoneyCancelBtn}
+              onPress={() => setShowSendMoney(false)}
+            >
+              <Text style={styles.sendMoneyCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </Animated.View>
   );
 }
@@ -315,6 +517,100 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-SemiBold',
     fontSize: 11,
     color: Colors.neutral.gray600,
+  },
+
+  // ─── Send Money Modal ──────────────────────────────────────────────────────────
+  sendMoneyOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sendMoneyContainer: {
+    width: '100%',
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  sendMoneyHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  sendMoneyTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 18,
+    color: Colors.primary.default,
+    marginTop: 8,
+  },
+  sendMoneySubtitle: {
+    fontFamily: 'Poppins',
+    fontSize: 11,
+    color: Colors.neutral.gray600,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  sendMoneyBody: {
+    marginBottom: 16,
+  },
+  sendMoneyLabel: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 11,
+    color: Colors.neutral.gray700,
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  sendMoneyInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F7F3',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.neutral.gray200,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sendMoneyInput: {
+    flex: 1,
+    fontFamily: 'Poppins',
+    fontSize: 14,
+    color: Colors.primary.default,
+    padding: 0,
+  },
+  sendMoneyBalance: {
+    fontFamily: 'Poppins',
+    fontSize: 10,
+    color: Colors.neutral.gray500,
+    marginTop: 4,
+  },
+  sendMoneyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.secondary.default,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  sendMoneyBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#FFF',
+  },
+  sendMoneyCancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  sendMoneyCancelText: {
+    fontFamily: 'Poppins',
+    fontSize: 13,
+    color: Colors.neutral.gray500,
   },
   tabBtnTextActive: {
     color: '#FAF9F5',

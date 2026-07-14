@@ -27,13 +27,6 @@ export async function initDatabase(): Promise<void> {
     console.warn('[SQLite] Failed to check/migrate product_customizations table:', err);
   }
 
-  // Migrate auth_tokens: drop and recreate to ensure correct schema
-  try {
-    await database.execAsync('DROP TABLE IF EXISTS auth_tokens;');
-  } catch (err) {
-    console.warn('[SQLite] Failed to drop auth_tokens table:', err);
-  }
-
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS auth_tokens (
       id INTEGER PRIMARY KEY,
@@ -567,4 +560,51 @@ export async function getCartItems(): Promise<any[]> {
     quantity: row.quantity,
     customization: row.customization_json ? JSON.parse(row.customization_json) : undefined
   }));
+}
+
+// ─── Pending QR Order Persistence ──────────────────────────────────────────────
+
+export async function savePendingQROrder(order: any): Promise<void> {
+  const database = await getDatabase();
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS pending_qr_order (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      order_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await database.execAsync('DELETE FROM pending_qr_order');
+  await database.runAsync(
+    'INSERT INTO pending_qr_order (id, order_json, created_at) VALUES (1, ?, ?)',
+    [JSON.stringify(order), new Date().toISOString()]
+  );
+}
+
+export async function getPendingQROrder(): Promise<any | null> {
+  const database = await getDatabase();
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS pending_qr_order (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      order_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+  const row = await database.getFirstAsync('SELECT * FROM pending_qr_order WHERE id = 1') as any;
+  if (!row) return null;
+
+  // Check if expired (15 minutes)
+  const createdAt = new Date(row.created_at).getTime();
+  const now = Date.now();
+  const fifteenMinutes = 15 * 60 * 1000;
+  if (now - createdAt > fifteenMinutes) {
+    await clearPendingQROrder();
+    return null;
+  }
+
+  return JSON.parse(row.order_json);
+}
+
+export async function clearPendingQROrder(): Promise<void> {
+  const database = await getDatabase();
+  await database.execAsync('DELETE FROM pending_qr_order');
 }

@@ -119,8 +119,8 @@ export async function getLoggedInUser(): Promise<UserSession | null> {
       email: row.email || '',
       phone: row.phone || '',
       avatar: row.avatar || '',
-      memberLevel: row.memberLevel || 'Silver',
-      memberLevelLabel: row.memberLevelLabel || 'Lesh Kaffe Silver Member',
+      memberLevel: row.memberLevel || 'Bronze',
+      memberLevelLabel: row.memberLevelLabel || 'Lesh Kaffe Bronze Member',
     };
   } catch (error) {
     console.warn('[authSession] getLoggedInUser error:', error);

@@ -74,3 +74,16 @@ export const claimVoucher = async (voucherId: number): Promise<{ success: boolea
     return null;
   }
 };
+
+/**
+ * Claim a voucher by entering its code
+ */
+export const claimVoucherByCode = async (code: string): Promise<{ success: boolean; message: string; voucher?: Voucher }> => {
+  try {
+    const { data } = await api.post('/vouchers/claim-by-code', { code });
+    return { success: true, message: data.message, voucher: data.voucher };
+  } catch (error: any) {
+    const message = error?.response?.data?.message || 'Failed to claim voucher.';
+    return { success: false, message };
+  }
+};

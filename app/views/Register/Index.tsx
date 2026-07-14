@@ -22,6 +22,8 @@ import { StepContact } from '../../../components/Register/StepContact';
 import { StepName } from '../../../components/Register/StepName';
 import { StepOtp } from '../../../components/Register/StepOtp';
 import { Colors } from '../../../components/UI/Colors';
+import { register } from '../../../services/authService';
+import { sendOtp, verifyOtp, resendOtp } from '../../../services/otpService';
 
 export default function Register() {
   const router = useRouter();
@@ -34,10 +36,51 @@ export default function Register() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
+
+  // OTP State
+  const [otpError, setOtpError] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   // Error States
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+
+  // ─── OTP Timer Effect ─────────────────────────────────────────────────────────
+  React.useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  // Send OTP when entering step 3
+  const handleSendOtp = async () => {
+    const fullPhone = `+63${phone}`;
+    const result = await sendOtp(fullPhone);
+    if (result.success) {
+      setResendCooldown(result.data?.resend_cooldown || 60);
+      setOtpError('');
+    } else {
+      setOtpError(result.message);
+    }
+  };
+
+  // Resend OTP handler
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setOtpError('');
+    const fullPhone = `+63${phone}`;
+    const result = await resendOtp(fullPhone);
+    if (result.success) {
+      setResendCooldown(result.data?.resend_cooldown || 60);
+      setOtp(['', '', '', '', '', '']);
+    } else {
+      setOtpError(result.message);
+    }
+  };
 
   // Step Transition Animations (keep old Animated for step transitions since it's imperative)
   const stepFade = useRef(new Animated.Value(1)).current;
@@ -103,6 +146,16 @@ export default function Register() {
       tempErrors.email = 'Enter a valid email address';
     }
 
+    if (!password.trim()) {
+      tempErrors.password = 'Password is required';
+    } else if (password.length < 6) {
+      tempErrors.password = 'Password must be at least 6 characters';
+    }
+
+    if (confirmPassword !== password) {
+      tempErrors.confirmPassword = 'Passwords do not match';
+    }
+
     if (!phone.trim()) {
       tempErrors.phone = 'Phone number is required';
     } else if (phone.length < 10) {
@@ -126,6 +179,7 @@ export default function Register() {
     } else if (step === 2) {
       if (validateStep2()) {
         animateToStep(3, 'forward');
+        handleSendOtp(); // Send OTP when entering step 3
       }
     }
   };
@@ -138,21 +192,47 @@ export default function Register() {
     }
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!validateStep3()) {
-      alert('Please enter the full 6-digit verification code.');
+      setOtpError('Please enter the full 6-digit code.');
       return;
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    setOtpError('');
+
+    try {
+      // Step 1: Verify OTP with server
+      const fullPhone = `+63${phone}`;
+      const otpCode = otp.join('');
+      const otpResult = await verifyOtp(fullPhone, otpCode);
+
+      if (!otpResult.success) {
+        setOtpError(otpResult.message);
+        setIsLoading(false);
+        return;
+      }
+
+      // Step 2: Register (server checks OTP was verified)
+      const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim();
+      const result = await register({
+        name: fullName,
+        first_name: firstName,
+        email: email.trim().toLowerCase(),
+        phone: `+63${phone}`,
+        password,
+      });
+
+      if (result.success) {
+        router.replace('/views/Home/Index');
+      } else {
+        setOtpError(result.message || 'Registration failed. Please try again.');
+      }
+    } catch (error: any) {
+      setOtpError('An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
-      const fullOtp = otp.join('');
-      alert(
-        `Espressia Account Registered!\n\nName: ${firstName} ${middleName ? middleName + ' ' : ''}${lastName}\nEmail: ${email}\nPhone: +63 ${phone}\nOTP Code Verified: ${fullOtp}`
-      );
-      router.replace('/views/Home/Index');
-    }, 2000);
+    }
   };
 
   const getStepTitle = () => {
@@ -233,9 +313,13 @@ export default function Register() {
             )}
 
             {step === 2 && (
-              <StepContact
+            <StepContact
                 email={email}
                 setEmail={setEmail}
+                password={password}
+                setPassword={setPassword}
+                confirmPassword={confirmPassword}
+                setConfirmPassword={setConfirmPassword}
                 phone={phone}
                 setPhone={setPhone}
                 errors={errors}
@@ -251,8 +335,11 @@ export default function Register() {
                 setOtp={setOtp}
                 phone={phone}
                 isLoading={isLoading}
+                otpError={otpError}
                 onBack={handleBack}
                 onSubmit={handleRegister}
+                onResend={handleResendOtp}
+                resendCooldown={resendCooldown}
               />
             )}
           </Animated.View>

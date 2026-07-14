@@ -22,9 +22,10 @@ import SecurityPrivacyView from './SecurityPrivacy';
 
 import { useAppData } from '../../../lib/useAppData';
 import { logout } from '../../../services/authService';
+import { saveCartItems } from '../../../lib/database';
 
 interface ProfileViewProps {
-  showAlert: (title: string, message: string, onConfirm?: () => void) => void;
+  showAlert: (title: string, message: string, onConfirm?: () => void, hideButton?: boolean, showCancel?: boolean) => void;
   onNavigateToStamps: () => void;
   initialSubView?: 'Main' | 'Personal' | 'Addresses' | 'Security';
   onClearInitialSubView?: () => void;
@@ -129,10 +130,13 @@ export default function ProfileView({
                     } else if (item.label === 'Loyalty Stamp Card') {
                       onNavigateToStamps();
                     } else if (item.label === 'Sign Out') {
-                      showAlert('Signed Out 🚪', 'You have successfully signed out.', async () => {
-                        await logout();
-                        router.replace('/');
-                      });
+                      showAlert('Sign Out', 'Are you sure you want to sign out?', async () => {
+                        try {
+                          await logout();
+                          await saveCartItems([]);
+                          router.replace('/');
+                        } catch (e) {}
+                      }, undefined, true);
                     }
                   }}
                 >

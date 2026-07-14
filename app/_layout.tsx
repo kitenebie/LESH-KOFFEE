@@ -12,6 +12,8 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { prefetchPublicData } from '../lib/prefetch';
 import { initDatabase } from '../lib/database';
 import { AppDataProvider } from '../lib/useAppData';
+import { getAuthToken } from '../lib/authSession';
+import { resumeSession } from '../services/authService';
 import {
   registerForPushNotifications,
   onNotificationReceived,
@@ -38,6 +40,23 @@ export default function RootLayout() {
       try {
         await initDatabase();
         prefetchPublicData();
+
+        // Auto-resume: If a stored token exists, validate it with the server
+        try {
+          const token = await getAuthToken();
+          if (token) {
+            const result = await resumeSession();
+            if (result.success) {
+              console.log('[Layout] Session resumed successfully');
+            } else {
+              console.log('[Layout] Token expired, user needs to re-login');
+            }
+          } else {
+            console.log('[Layout] No stored token, user not logged in');
+          }
+        } catch (authErr) {
+          console.warn('[Layout] Session resume failed:', authErr);
+        }
 
         // Register for push notifications (FCM) — silently fails in Expo Go
         try {

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
   Animated,
+  ActivityIndicator,
   Dimensions,
   Easing,
   Image,
@@ -34,12 +35,16 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { useRouter } from 'expo-router';
 import { LoginRequiredModal } from '../../../components/UI/LoginRequiredModal';
-import { getCartItems, saveCartItems } from '../../../lib/database';
+import { getCartItems, saveCartItems, savePendingQROrder, getPendingQROrder, clearPendingQROrder } from '../../../lib/database';
 import { useAppData } from '../../../lib/useAppData';
 import { useAuth } from '../../../lib/useAuth';
 import { createCheckout } from '../../../services/paymentService';
+import api from '../../../lib/axios';
 import { createOrder } from '../../../services/ordersService';
 import CheckoutPage from '../Checkout/CheckoutPage';
+import { ScannerPageContent } from '../admin/Scanner/index';
+import CreateOrderPage from '../admin/CreateOrder/index';
+import { logout } from '../../../services/authService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -81,8 +86,18 @@ export default function Home() {
   const router = useRouter();
   const [showLoginModal, setShowLoginModal] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'Home' | 'Orders' | 'Wallet' | 'Profile' | 'Notification' | 'StampCard'>('Home');
+  const userRole = dummyData?.user?.role || 'user';
+  const isSuperAdmin = userRole === 'super_admin';
+
+  const [activeTab, setActiveTab] = useState<'Home' | 'Orders' | 'Wallet' | 'Profile' | 'Notification' | 'StampCard' | 'QRCode' | 'CreateOrder'>(isSuperAdmin ? 'QRCode' : 'Home');
   const [stampCardOrigin, setStampCardOrigin] = useState<'Home' | 'Profile'>('Home');
+
+  // When role loads async, redirect super-admin to QRCode
+  React.useEffect(() => {
+    if (isSuperAdmin && activeTab === 'Home') {
+      setActiveTab('QRCode');
+    }
+  }, [isSuperAdmin]);
   const [profileInitialSubView, setProfileInitialSubView] = useState<'Main' | 'Addresses'>('Main');
   const [generatedOrder, setGeneratedOrder] = useState<any>(null);
   const [homeSubView, setHomeSubView] = useState<'Main' | 'BestSellers' | 'OurMenu' | 'Promos'>('Main');
@@ -131,7 +146,7 @@ export default function Home() {
   const [cart, setCart] = useState<CartItem[]>([]);
 
   // 1. Digital Wallet & Subscription States
-  const [walletBalance, setWalletBalance] = useState<number>(dummyData?.wallet?.balance || dummyData?.user?.walletBalance || 0);
+  const [walletBalance, setWalletBalance] = useState<number>(dummyData?.wallet?.balance ?? 0);
   const [activeSubscription, setActiveSubscription] = useState<string | null>(null);
   const [subscriptionBalance, setSubscriptionBalance] = useState<number>(0);
 
@@ -162,7 +177,7 @@ export default function Home() {
   const [claimingVoucherId, setClaimingVoucherId] = useState<number | null>(null);
 
   // Lifted voucher application states for CartView calculations
-  const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; discount: number; label: string } | null>(null);
+  const [appliedVouchers, setAppliedVouchers] = useState<{ code: string; discount: number; label: string; type?: string; max_discount?: number }[]>([]);
   const [voucherCode, setVoucherCode] = useState('');
   const [voucherStatus, setVoucherStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
 
@@ -171,7 +186,7 @@ export default function Home() {
   const [checkoutUrl, setCheckoutUrl] = useState('');
   const [checkoutOrderId, setCheckoutOrderId] = useState('');
   const [checkoutPurpose, setCheckoutPurpose] = useState<'order' | 'topup' | 'subscription'>('order');
-  const [pendingSubscription, setPendingSubscription] = useState<{ name: string; drinkCount: number } | null>(null);
+  const [pendingSubscription, setPendingSubscription] = useState<{ name: string; drinkCount: number; subscriptionId: number } | null>(null);
   const [pendingTopUpAmount, setPendingTopUpAmount] = useState<number>(0);
 
   // 4. Fulfillment & Payment states
@@ -183,6 +198,7 @@ export default function Home() {
     visible: boolean;
     title: string;
     message: string;
+    showCancel?: boolean;
     hideButton?: boolean;
     onConfirm?: () => void;
   }>({
@@ -237,6 +253,19 @@ export default function Home() {
       }
     };
     loadCart();
+
+    // Restore pending QR order if exists and not expired
+    const loadPendingQR = async () => {
+      try {
+        const pendingOrder = await getPendingQROrder();
+        if (pendingOrder) {
+          setGeneratedOrder(pendingOrder);
+        }
+      } catch (error) {
+        console.warn('Failed to load pending QR order:', error);
+      }
+    };
+    loadPendingQR();
   }, []);
 
   // Save cart to SQLite whenever it changes (after initial load)
@@ -254,9 +283,17 @@ export default function Home() {
 
   // Sync wallet balance when API data loads
   React.useEffect(() => {
-    const apiBalance = dummyData?.wallet?.balance || dummyData?.user?.walletBalance;
-    if (apiBalance && apiBalance > 0) setWalletBalance(apiBalance);
-  }, [dummyData?.wallet?.balance, dummyData?.user?.walletBalance]);
+    const apiBalance = dummyData?.wallet?.balance;
+    if (apiBalance !== undefined && apiBalance !== null) setWalletBalance(apiBalance);
+  }, [dummyData?.wallet?.balance]);
+
+  // Sync subscription state when API data loads
+  React.useEffect(() => {
+    const sub = dummyData?.user?.activeSubscription;
+    const subBal = dummyData?.user?.subscriptionBalance;
+    if (sub && !activeSubscription) setActiveSubscription(sub);
+    if (subBal && subBal > 0 && subscriptionBalance === 0) setSubscriptionBalance(subBal);
+  }, [dummyData?.user?.activeSubscription, dummyData?.user?.subscriptionBalance]);
 
   // Customizer animations trigger
   React.useEffect(() => {
@@ -408,6 +445,15 @@ export default function Home() {
     });
   };
 
+  const dismissAlert = () => {
+    Animated.parallel([
+      Animated.timing(alertScale, { toValue: 0.8, duration: 120, useNativeDriver: true }),
+      Animated.timing(alertOpacity, { toValue: 0, duration: 120, useNativeDriver: true })
+    ]).start(() => {
+      setAlertConfig((prev) => ({ ...prev, visible: false }));
+    });
+  };
+
   const closeNotification = () => {
     Animated.timing(notifTranslateX, {
       toValue: width,
@@ -418,12 +464,13 @@ export default function Home() {
     });
   };
 
-  const showAlert = (title: string, message: string, onConfirm?: () => void, hideButton?: boolean) => {
+  const showAlert = (title: string, message: string, onConfirm?: () => void, hideButton?: boolean, showCancel?: boolean) => {
     setAlertConfig({
       visible: true,
       title,
       message,
       hideButton,
+      showCancel,
       onConfirm
     });
   };
@@ -490,7 +537,7 @@ export default function Home() {
 
   // Fetch unclaimed vouchers on mount
   React.useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || isSuperAdmin) return;
     const fetchUnclaimed = async () => {
       try {
         const { getUnclaimedVouchers } = await import('../../../services/vouchersService');
@@ -742,7 +789,11 @@ export default function Home() {
 
   // Cart totals
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const cartTotal = cart.reduce((sum, item) => {
+    const basePrice = Number(item.product.price);
+    const extraPrice = item.customization?.price ? (Number(item.customization.price) - basePrice) : 0;
+    return sum + (basePrice + extraPrice) * item.quantity;
+  }, 0);
   const deliveryFee = fulfillmentMode === 'Delivery' ? 49 : 0;
 
   // Subscription Discount calculation
@@ -758,14 +809,63 @@ export default function Home() {
   };
   const subscriptionDiscount = getSubscriptionDiscount();
 
+  // Subscription Perk Discount (e.g. 10% food discount)
+  const { perkDiscount, perksApplied } = React.useMemo(() => {
+    if (!activeSubscription || cart.length === 0) return { perkDiscount: 0, perksApplied: [] };
+
+    // Find active subscription's perks from dummyData
+    const activePlan = (dummyData?.subscriptions || []).find((s: any) => s.name === activeSubscription);
+    const perks = activePlan?.perks || [];
+    if (perks.length === 0) return { perkDiscount: 0, perksApplied: [] };
+
+    let totalPerkDiscount = 0;
+    const applied: any[] = [];
+
+    perks.forEach((perk: any) => {
+      // Find cart items matching perk's category
+      const matchingItems = cart.filter(item => String(item.product.categoryId) === String(perk.category_id));
+      if (matchingItems.length === 0) return;
+
+      let perkAmount = 0;
+      matchingItems.forEach(item => {
+        const itemPrice = Number(item.product.price) * item.quantity;
+        if (perk.discount_type === 'percent') {
+          const disc = itemPrice * (perk.discount_value / 100);
+          perkAmount += perk.max_discount ? Math.min(disc, perk.max_discount) : disc;
+        } else {
+          perkAmount += Math.min(perk.discount_value, itemPrice) * item.quantity;
+        }
+      });
+
+      if (perkAmount > 0) {
+        totalPerkDiscount += perkAmount;
+        applied.push({ category_name: perk.category_name, discount_type: perk.discount_type, discount_value: perk.discount_value, applied_discount: perkAmount });
+      }
+    });
+
+    return { perkDiscount: Math.round(totalPerkDiscount * 100) / 100, perksApplied: applied };
+  }, [cart, activeSubscription, dummyData?.subscriptions]);
+
   // Eligible subtotal for voucher discount
   const eligibleSubtotal = Math.max(0, cartTotal - subscriptionDiscount);
 
   // Voucher Discount calculation
-  const voucherDiscount = appliedVoucher ? eligibleSubtotal * appliedVoucher.discount : 0;
+  const voucherDiscount = appliedVouchers.reduce((sum, v) => {
+    // Check min order amount requirement
+    const minOrder = v.min_order_amount ? Number(v.min_order_amount) : 0;
+    if (minOrder > 0 && eligibleSubtotal < minOrder) return sum;
+
+    if (v.type === 'fixed') {
+      // Only apply if subtotal can cover the fixed discount
+      return eligibleSubtotal >= v.discount ? sum + v.discount : sum;
+    }
+    // Percent: apply with cap if max_discount exists
+    const raw = eligibleSubtotal * v.discount;
+    return sum + Math.min(raw, v.max_discount || Infinity);
+  }, 0);
 
   // Grand Total
-  const grandTotal = Math.max(0, eligibleSubtotal - voucherDiscount) + deliveryFee;
+  const grandTotal = Math.max(0, eligibleSubtotal - voucherDiscount - perkDiscount) + deliveryFee;
 
   // Wallet top-up execution
   const executeTopUp = async () => {
@@ -826,7 +926,7 @@ export default function Home() {
       setCheckoutUrl(result.data.checkout_url);
       setCheckoutOrderId(paramId);
       setCheckoutPurpose('subscription');
-      setPendingSubscription({ name: subName, drinkCount });
+      setPendingSubscription({ name: subName, drinkCount, subscriptionId: subId });
       setAlertConfig(prev => ({ ...prev, visible: false }));
       setShowCheckoutWebView(true);
     } else {
@@ -852,56 +952,53 @@ export default function Home() {
       const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
       const dineInOrder = {
-        id: `LK-QR-${Math.floor(10000 + Math.random() * 90000)}`,
+        order_number: `LK-QR-${Math.floor(10000 + Math.random() * 90000)}`,
+        user_id: Number(dummyData?.user?.id || 0),
         date: dateStr,
         time: timeStr,
         status: 'Preparing',
         currentStep: 'preparing' as const,
         fulfillment: fulfillmentMode,
-        tableNo: dummyData.user.tableNo || '04',
+        ref_no: dummyData.user.tableNo || '04',
         cashier: dummyData.user.cashier || 'Jocelyn',
-        lineItems: cart.map(item => ({
+        payment_method: 'cash',
+        items: cart.map(item => {
+          const basePrice = Number(item.product.price);
+          const extraPrice = item.customization?.price ? (Number(item.customization.price) - basePrice) : 0;
+          const unitPrice = basePrice + extraPrice;
+          return {
+          product_id: Number(item.product.id),
           name: item.product.name,
-          qty: item.quantity,
-          price: item.product.price
-        })),
+          quantity: item.quantity,
+          price: unitPrice,
+          customization: item.customization || null,
+          };
+        }),
         subtotal: cartTotal,
-        deliveryFee: deliveryFee,
-        discount: subscriptionDiscount + voucherDiscount,
+        delivery_fee: deliveryFee,
+        discount: subscriptionDiscount + voucherDiscount + perkDiscount,
         total: grandTotal,
-        voucherCode: appliedVoucher?.code || null,
+        voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
         voucherDiscount: voucherDiscount,
-        subscriptionDiscount: subscriptionDiscount
+        subscriptionDiscount: subscriptionDiscount,
+        perkDiscount: perkDiscount,
+        subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
+        createdAt: new Date().toISOString(),
       };
 
       addOrderLocal(dineInOrder);
 
-      // Sync order to backend
-      createOrder({
-        order_number: dineInOrder.id,
-        fulfillment: dineInOrder.fulfillment,
-        table_no: dineInOrder.tableNo,
-        cashier: dineInOrder.cashier,
-        subtotal: dineInOrder.subtotal,
-        delivery_fee: dineInOrder.deliveryFee,
-        discount: dineInOrder.discount,
-        total: dineInOrder.total,
-        payment_method: 'COD',
-        items: cart.map(item => ({
-          product_id: Number(item.product.id),
-          name: item.product.name,
-          quantity: item.quantity,
-          price: item.product.price,
-          customization: item.customization
-        }))
-      }).catch(err => console.warn('Failed to sync COD order to backend:', err));
+      // NOTE: Order is NOT created on the server here.
+      // The QR code is shown to the cashier/admin who scans it
+      // and creates the order from the admin panel.
 
       setCart([]);
-      setAppliedVoucher(null);
+      setAppliedVouchers([]);
       setVoucherCode('');
       setVoucherStatus('idle');
       closeCartView();
       setGeneratedOrder(dineInOrder);
+      savePendingQROrder(dineInOrder).catch(err => console.warn('Failed to save pending QR:', err));
       return;
     }
 
@@ -937,16 +1034,25 @@ export default function Home() {
         cashier: dummyData.user.cashier || 'Jocelyn',
         subtotal: cartTotal,
         delivery_fee: deliveryFee,
-        discount: subscriptionDiscount + voucherDiscount,
+        discount: subscriptionDiscount + voucherDiscount + perkDiscount,
+        subscription_discount: subscriptionDiscount,
+        voucher_discount: voucherDiscount,
+        perk_discount: perkDiscount,
+        voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
+        subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
         total: grandTotal,
         payment_method: 'card',
-        items: cart.map(item => ({
+        items: cart.map(item => {
+          const bp = Number(item.product.price);
+          const ep = item.customization?.price ? (Number(item.customization.price) - bp) : 0;
+          return {
           product_id: Number(item.product.id),
           name: item.product.name,
           quantity: item.quantity,
-          price: item.product.price,
-          customization: item.customization
-        }))
+          price: bp + ep,
+          customization: item.customization,
+          };
+        })
       });
     } catch (err) {
       console.warn('Failed to pre-create order on backend:', err);
@@ -973,7 +1079,7 @@ export default function Home() {
   };
 
   // Handle payment success from WebView
-  const handlePaymentSuccess = () => {
+  const handlePaymentSuccess = async () => {
     setShowCheckoutWebView(false);
 
     if (checkoutPurpose === 'topup') {
@@ -989,8 +1095,23 @@ export default function Home() {
     } else if (checkoutPurpose === 'subscription') {
       // ─── SUBSCRIPTION PURCHASE SUCCESS ───
       if (pendingSubscription) {
-        setActiveSubscription(pendingSubscription.name);
-        setSubscriptionBalance(pendingSubscription.drinkCount);
+        // Call server to create subscription (in case webhook is delayed)
+        try {
+          const subRes = await api.post('/subscriptions/subscribe', {
+            subscription_id: pendingSubscription.subscriptionId,
+          });
+          if (subRes.data?.success && subRes.data?.data) {
+            setActiveSubscription(pendingSubscription.name);
+            setSubscriptionBalance(subRes.data.data.drinks_remaining || pendingSubscription.drinkCount);
+          } else {
+            setActiveSubscription(pendingSubscription.name);
+            setSubscriptionBalance(pendingSubscription.drinkCount);
+          }
+        } catch (e) {
+          // Webhook may have already processed it — just set local state
+          setActiveSubscription(pendingSubscription.name);
+          setSubscriptionBalance(pendingSubscription.drinkCount);
+        }
         showAlert(
           'Subscription Activated! ☕',
           `"${pendingSubscription.name}" purchased successfully. ${pendingSubscription.drinkCount} drink credits are now active.`
@@ -1013,23 +1134,29 @@ export default function Home() {
         fulfillment: fulfillmentMode,
         tableNo: dummyData.user.tableNo || '04',
         cashier: dummyData.user.cashier || 'Jocelyn',
-        lineItems: cart.map(item => ({
+        lineItems: cart.map(item => {
+          const bp = Number(item.product.price);
+          const ep = item.customization?.price ? (Number(item.customization.price) - bp) : 0;
+          return {
           name: item.product.name,
           qty: item.quantity,
-          price: item.product.price
-        })),
+          price: bp + ep,
+          };
+        }),
         subtotal: cartTotal,
         deliveryFee: deliveryFee,
-        discount: subscriptionDiscount + voucherDiscount,
+        discount: subscriptionDiscount + voucherDiscount + perkDiscount,
         total: grandTotal,
-        voucherCode: appliedVoucher?.code || null,
+        voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
         voucherDiscount: voucherDiscount,
-        subscriptionDiscount: subscriptionDiscount
+        subscriptionDiscount: subscriptionDiscount,
+        perkDiscount: perkDiscount,
+        subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
       };
 
       addOrderLocal(newOrder);
       setCart([]);
-      setAppliedVoucher(null);
+      setAppliedVouchers([]);
       setVoucherCode('');
       setVoucherStatus('idle');
       showAlert('Payment Successful! 🎉', `Order ${checkoutOrderId} has been paid. Your order is now being prepared.`);
@@ -1057,11 +1184,15 @@ export default function Home() {
     const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    const lineItems = cart.map(item => ({
+    const lineItems = cart.map(item => {
+      const bp = Number(item.product.price);
+      const ep = item.customization?.price ? (Number(item.customization.price) - bp) : 0;
+      return {
       name: item.product.name,
       qty: item.quantity,
-      price: item.product.price
-    }));
+      price: bp + ep,
+      };
+    });
     if (addPastry) {
       lineItems.push({
         name: 'Classic Butter Croissant',
@@ -1082,11 +1213,13 @@ export default function Home() {
       lineItems,
       subtotal: cartTotal + (addPastry ? 65 : 0),
       deliveryFee: deliveryFee,
-      discount: subscriptionDiscount + voucherDiscount,
+      discount: subscriptionDiscount + voucherDiscount + perkDiscount,
       total: finalTotal,
-      voucherCode: appliedVoucher?.code || null,
+      voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
       voucherDiscount: voucherDiscount,
-      subscriptionDiscount: subscriptionDiscount
+      subscriptionDiscount: subscriptionDiscount,
+      perkDiscount: perkDiscount,
+      subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
     };
 
     if (paymentMethod === 'Wallet') {
@@ -1133,6 +1266,11 @@ export default function Home() {
       subtotal: newOrder.subtotal,
       delivery_fee: newOrder.deliveryFee,
       discount: newOrder.discount,
+      subscription_discount: subscriptionDiscount,
+      voucher_discount: voucherDiscount,
+      perk_discount: perkDiscount,
+      voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
+      subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
       total: newOrder.total,
       payment_method: paymentMethod === 'Wallet' ? 'wallet' : paymentMethod === 'CardEWallet' ? 'card' : 'COD',
       items: cart.map(item => ({
@@ -1164,20 +1302,30 @@ export default function Home() {
       setSubscriptionBalance(subscriptionBalance - drinksCovered);
     }
     setCart([]);
-    setAppliedVoucher(null);
+    setAppliedVouchers([]);
     setVoucherCode('');
     setVoucherStatus('idle');
     closeCartView();
     setActiveTab('Home');
   };
 
+  // Show full-screen loading while data is being fetched after login
+  if (isLoading && !dummyData?.user?.id) {
+    return (
+      <View style={styles.fullLoadingScreen}>
+        <ActivityIndicator size="large" color={Colors.primary.default} />
+        <Text style={styles.fullLoadingText}>Loading your experience...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* 1. MAIN CONTENT (Depends on active tab) */}
       <View style={styles.mainContent}>
-        {activeTab === 'Home' && isLoading ? (
+        {!isSuperAdmin && activeTab === 'Home' && isLoading ? (
           <HomeSkeleton />
-        ) : activeTab === 'Home' && (
+        ) : !isSuperAdmin && activeTab === 'Home' && (
           homeSubView === 'BestSellers' ? (
             <BestSellersPage
               products={popularProducts as any}
@@ -1194,6 +1342,8 @@ export default function Home() {
           ) : homeSubView === 'Promos' ? (
             <PromoDiscount
               promos={dummyData.promos as any}
+              claimedVoucherCodes={dummyData.vouchers?.map((v: any) => v.code) || []}
+              vouchers={dummyData.vouchers as any}
               onBack={() => setHomeSubView('Main')}
               onSendGift={() => {
                 setHomeSubView('Main');
@@ -1602,30 +1752,35 @@ export default function Home() {
         )}
 
         {/* MODULAR ORDERS VIEW */}
-        {activeTab === 'Orders' && (
+        {!isSuperAdmin && activeTab === 'Orders' && (
           <OrdersView />
         )}
 
         {/* MODULAR WALLET VIEW */}
-        {activeTab === 'Wallet' && (
+        {!isSuperAdmin && activeTab === 'Wallet' && (
           <WalletView
             walletBalance={walletBalance}
             setShowTopUpModal={setShowTopUpModal}
             activeSubscription={activeSubscription}
             subscriptionBalance={subscriptionBalance}
             handleBuySubscription={handleBuySubscription}
+            showAlert={showAlert}
+            onOrderGenerated={(order) => {
+              setGeneratedOrder(order);
+              savePendingQROrder(order).catch(err => console.warn('Failed to save pending QR:', err));
+            }}
           />
         )}
 
         {/* MODULAR NOTIFICATION VIEW */}
-        {activeTab === 'Notification' && (
+        {!isSuperAdmin && activeTab === 'Notification' && (
           <Animated.View style={{ flex: 1, transform: [{ translateX: notifTranslateX }] }}>
             <NotificationView onBack={closeNotification} />
           </Animated.View>
         )}
 
         {/* MODULAR PROFILE VIEW */}
-        {activeTab === 'Profile' && (
+        {!isSuperAdmin && activeTab === 'Profile' && (
           <ProfileView
             showAlert={showAlert}
             onNavigateToStamps={() => navigateToStampCard('Profile')}
@@ -1634,11 +1789,71 @@ export default function Home() {
           />
         )}
 
+        {/* ADMIN: QR CODE VIEW */}
+        {activeTab === 'QRCode' && isSuperAdmin && (
+          <ScannerPageContent />
+        )}
+
+        {/* ADMIN: CREATE ORDER VIEW */}
+        {activeTab === 'CreateOrder' && isSuperAdmin && (
+          <CreateOrderPage />
+        )}
+
         {/* MODULAR STAMP CARD VIEW (Rendered as sliding overlay at root) */}
       </View>
 
       {/* 2. FIXED BOTTOM NAVIGATION BAR */}
+      {isSuperAdmin ? (
       <View style={styles.bottomNav}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => setActiveTab('QRCode')}
+        >
+          <Ionicons
+            name={activeTab === 'QRCode' ? 'qr-code' : 'qr-code-outline'}
+            size={22}
+            color={activeTab === 'QRCode' ? Colors.primary.default : Colors.neutral.gray500}
+          />
+          <Text style={[styles.navText, activeTab === 'QRCode' && styles.navTextActive]}>
+            QR Code
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => setActiveTab('CreateOrder')}
+        >
+          <Ionicons
+            name={activeTab === 'CreateOrder' ? 'create' : 'create-outline'}
+            size={22}
+            color={activeTab === 'CreateOrder' ? Colors.primary.default : Colors.neutral.gray500}
+          />
+          <Text style={[styles.navText, activeTab === 'CreateOrder' && styles.navTextActive]}>
+            Create Order
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => {
+            showAlert('Sign Out', 'Are you sure you want to sign out?', async () => {
+              await logout();
+              router.replace('/');
+            });
+          }}
+        >
+          <Ionicons
+            name="log-out-outline"
+            size={22}
+            color={Colors.danger.default}
+          />
+          <Text style={[styles.navText, { color: Colors.danger.default }]}>
+            Sign Out
+          </Text>
+        </TouchableOpacity>
+      </View>
+      ) : (
+      <View style={styles.bottomNav}> 
         <TouchableOpacity 
           style={styles.navItem} 
           onPress={() => setActiveTab('Home')}
@@ -1704,6 +1919,7 @@ export default function Home() {
           </Text>
         </TouchableOpacity>
       </View>
+      )}
 
       {/* ==================== ANIMATION LAYER (FLYING PRODUCTS) ==================== */}
       {flyingItems.map((item) => (
@@ -2008,54 +2224,87 @@ export default function Home() {
       )}
 
       {/* UNCLAIMED VOUCHER POP-UP */}
-      {showVoucherPopup && unclaimedVouchers.length > 0 && (
+      {!isSuperAdmin && showVoucherPopup && unclaimedVouchers.length > 0 && (
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContentSmall, { opacity: voucherOpacity, transform: [{ scale: voucherScale }] }]}>
-            <View style={styles.voucherPopupHeader}>
-              <Ionicons name="gift" size={56} color={Colors.secondary.default} />
+            <View style={styles.voucherPopupHeader2}>
+              <Ionicons name="gift" size={36} color={Colors.secondary.default} />
+              <Text style={styles.voucherPopupTitle2}>
+                {unclaimedVouchers.length === 1 ? 'Claim Your Voucher! 🎟️' : `${unclaimedVouchers.length} Vouchers Available!`}
+              </Text>
             </View>
-            <View style={styles.modalBody}>
-              <Text style={styles.voucherPopupTitle}>
-                {unclaimedVouchers.length === 1 ? 'Claim Your Voucher! 🎟️' : `${unclaimedVouchers.length} Vouchers Available! 🎟️`}
-              </Text>
-              <Text style={styles.voucherPopupDesc}>
-                You have unclaimed vouchers waiting for you. Claim them now to use on your next order!
-              </Text>
 
-              {/* Voucher List */}
-              <ScrollView style={{ maxHeight: 200, marginBottom: 12 }} showsVerticalScrollIndicator={false}>
-                {unclaimedVouchers.map((voucher) => (
-                  <View key={voucher.id} style={styles.voucherListItem}>
-                    <View style={styles.voucherListLeft}>
-                      <View style={styles.voucherListIcon}>
-                        <Ionicons name="pricetag" size={16} color={Colors.secondary.default} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.voucherListLabel}>{voucher.label}</Text>
-                        <Text style={styles.voucherListCode}>Code: {voucher.code}</Text>
-                        <Text style={styles.voucherListDiscount}>
-                          {voucher.type === 'percent' ? `${(voucher.discount * 100).toFixed(0)}% OFF` : `₱${Number(voucher.discount).toFixed(2)} OFF`}
-                        </Text>
+            {/* Voucher Cards */}
+            <ScrollView style={{ maxHeight: 320, paddingHorizontal: 16 }} showsVerticalScrollIndicator={false}>
+              {unclaimedVouchers.map((voucher: any, idx: number) => {
+                const cardColors = [Colors.secondary.default, '#5B8A72', '#C67B5C', '#6B5CA5'];
+                const bgColor = cardColors[idx % cardColors.length];
+                const isClaimed = dummyData.vouchers.some((v: any) => v.code === voucher.code);
+
+                return (
+                  <View key={voucher.id} style={styles.ticketCard}>
+                    {/* Ticket Left (main content) */}
+                    <View style={[styles.ticketLeft, { backgroundColor: bgColor }]}>
+                      {/* Claimed Badge */}
+                      {isClaimed && (
+                        <View style={styles.ticketClaimedBadge}>
+                          <Ionicons name="checkmark-circle" size={10} color="#FFF" />
+                          <Text style={styles.ticketClaimedText}> Claimed</Text>
+                        </View>
+                      )}
+                      <Text style={styles.ticketLabel} numberOfLines={2}>{voucher.label}</Text>
+                      <Text style={styles.ticketDiscount}>
+                        {voucher.type === 'percent' ? `${(voucher.discount * 100).toFixed(0)}% OFF` : `₱${Number(voucher.discount).toFixed(0)} OFF`}
+                      </Text>
+                      <View style={styles.ticketCodePill}>
+                        <Text style={styles.ticketCodeText}>{voucher.code}</Text>
                       </View>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.voucherClaimItemBtn, claimingVoucherId === voucher.id && { opacity: 0.5 }]}
-                      onPress={() => handleClaimVoucher(voucher.id)}
-                      disabled={claimingVoucherId === voucher.id}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.voucherClaimItemBtnText}>
-                        {claimingVoucherId === voucher.id ? '...' : 'Claim'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </ScrollView>
 
-              <TouchableOpacity 
-                style={styles.voucherSkipBtn}
-                onPress={closeVoucher}
-              >
+                    {/* Perforated divider */}
+                    <View style={[styles.ticketDivider, { backgroundColor: bgColor }]}>
+                      <View style={[styles.ticketNotchTop, { backgroundColor: '#FAF9F5' }]} />
+                      <View style={styles.ticketDashedLine}>
+                        {Array.from({ length: 8 }).map((_, i) => (
+                          <View
+                            key={i}
+                            style={{ width: 2, height: 6, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 1, marginVertical: 2 }}
+                          />
+                        ))}
+                      </View>
+                      <View style={[styles.ticketNotchBottom, { backgroundColor: '#FAF9F5' }]} />
+                    </View>
+
+                    {/* Ticket Right (action) */}
+                    <View style={[styles.ticketRight, { backgroundColor: bgColor }]}>
+                    {isClaimed && (
+                        <Ionicons name="checkmark-circle" size={24} color="rgba(255,255,255,0.8)" />
+                      )}
+                      {!isClaimed && (
+                        <TouchableOpacity
+                          style={[styles.ticketClaimBtn, claimingVoucherId === voucher.id && { opacity: 0.5 }]}
+                          onPress={() => handleClaimVoucher(voucher.id)}
+                          disabled={claimingVoucherId === voucher.id}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="ticket-outline" size={16} color={bgColor} />
+                          <Text style={[styles.ticketClaimBtnText, { color: bgColor }]}>
+                            {claimingVoucherId === voucher.id ? '...' : 'Claim'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View style={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12 }}>
+              <TouchableOpacity style={styles.voucherSeeMoreBtn} onPress={() => { closeVoucher(); setHomeSubView('Promos'); }} activeOpacity={0.8}>
+                <Text style={styles.voucherSeeMoreText}>See More</Text>
+                <Ionicons name="arrow-forward" size={14} color={Colors.primary.default} style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.voucherSkipBtn} onPress={closeVoucher}>
                 <Text style={styles.voucherSkipText}>Maybe Later</Text>
               </TouchableOpacity>
             </View>
@@ -2068,13 +2317,30 @@ export default function Home() {
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContentSmall, { opacity: alertOpacity, transform: [{ scale: alertScale }] }]}>
             <View style={styles.customAlertHeader}>
-              <Ionicons name="information-circle-outline" size={48} color={Colors.primary.default} />
+              <Ionicons name={alertConfig.showCancel ? "log-out-outline" : "information-circle-outline"} size={48} color={alertConfig.showCancel ? Colors.danger.default : Colors.primary.default} />
             </View>
             <View style={styles.modalBody}>
               <Text style={styles.customAlertTitle}>{alertConfig.title}</Text>
               <Text style={styles.customAlertMessage}>{alertConfig.message}</Text>
               
-              {!alertConfig.hideButton && (
+              {!alertConfig.hideButton && alertConfig.showCancel && (
+              <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                <Button
+                  title="No"
+                  variant="outline"
+                  onPress={dismissAlert}
+                  style={[styles.customAlertBtn, { flex: 1 }]}
+                />
+                <Button
+                  title="Yes"
+                  variant="primary"
+                  onPress={closeAlert}
+                  style={[styles.customAlertBtn, { flex: 1 }]}
+                />
+              </View>
+              )}
+
+              {!alertConfig.hideButton && !alertConfig.showCancel && (
               <Button
                 title="OK"
                 variant="primary"
@@ -2105,8 +2371,10 @@ export default function Home() {
           grandTotal={grandTotal}
           subscriptionDiscount={subscriptionDiscount}
           voucherDiscount={voucherDiscount}
-          appliedVoucher={appliedVoucher}
-          setAppliedVoucher={setAppliedVoucher}
+          perkDiscount={perkDiscount}
+          perksApplied={perksApplied}
+          appliedVouchers={appliedVouchers}
+          setAppliedVouchers={setAppliedVouchers}
           voucherCode={voucherCode}
           setVoucherCode={setVoucherCode}
           voucherStatus={voucherStatus}
@@ -2142,7 +2410,10 @@ export default function Home() {
         >
           <GeneratedOrderQR 
             order={generatedOrder} 
-            onBack={() => setGeneratedOrder(null)} 
+            onBack={() => {
+              setGeneratedOrder(null);
+              clearPendingQROrder().catch(err => console.warn('Failed to clear pending QR:', err));
+            }} 
           />
         </Animated.View>
       )}
@@ -2180,6 +2451,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FAF9F5', 
+  },
+  fullLoadingScreen: {
+    flex: 1,
+    backgroundColor: '#FAF9F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullLoadingText: {
+    fontFamily: 'Poppins',
+    fontSize: 14,
+    color: Colors.neutral.gray500,
+    marginTop: 16,
   },
   mainContent: {
     flex: 1,
@@ -2947,7 +3230,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContentSmall: {
-    width: '85%',
+    width: '98%',
     backgroundColor: '#FAF9F5',
     borderRadius: 24,
     padding: 20,
@@ -3400,5 +3683,238 @@ const styles = StyleSheet.create({
     height: 36,
     marginLeft: 6,
     borderRadius: 6,
+  },
+  voucherPopupHeader2: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 20,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+  },
+  voucherPopupTitle2: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: Colors.primary.default,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  voucherPopupDesc2: {
+    fontFamily: 'Poppins',
+    fontSize: 11,
+    color: Colors.neutral.gray600,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  voucherCard: {
+    flexDirection: 'row',
+    height: 120,
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  voucherCardLeft: {
+    flex: 1.3,
+    padding: 14,
+    justifyContent: 'center',
+  },
+  voucherCardLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#FFF',
+    lineHeight: 18,
+  },
+  voucherCardDiscount: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#FFF',
+    opacity: 0.9,
+    marginTop: 2,
+  },
+  voucherCardCodePill: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'flex-start',
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  voucherCardCodeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#FFF',
+  },
+  voucherCardRight: {
+    flex: 0.7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  voucherCardShape: {
+    position: 'absolute',
+    left: -30,
+    top: -40,
+    width: 120,
+    height: 200,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    transform: [{ rotate: '15deg' }],
+  },
+  voucherClaimedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.85)',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    zIndex: 10,
+  },
+  voucherClaimedBadgeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#FFF',
+    marginLeft: 3,
+  },
+  voucherClaimBtn: {
+    backgroundColor: '#FFF',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  voucherClaimBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10,
+    color: Colors.primary.default,
+  },
+
+  // ─── Ticket-Style Voucher Cards ───────────────────────────────────────────────
+  ticketCard: {
+    flexDirection: 'row',
+    height: 130,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  ticketLeft: {
+    flex: 1,
+    padding: 14,
+    paddingRight: 6,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  ticketClaimedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  ticketClaimedText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#FFF',
+  },
+  ticketLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#FFF',
+    lineHeight: 18,
+    marginBottom: 2,
+  },
+  ticketDiscount: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#FFF',
+    opacity: 0.9,
+  },
+  ticketCodePill: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'flex-start',
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  ticketCodeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#FFF',
+    letterSpacing: 1,
+  },
+  ticketDivider: {
+    width: 20,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 0,
+    zIndex: 2,
+    marginVertical: -1,
+  },
+  ticketNotchTop: {
+    width: 20,
+    height: 16,
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    marginTop: -1,
+  },
+  ticketNotchBottom: {
+    width: 20,
+    height: 16,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    marginBottom: -1,
+  },
+  ticketDashedLine: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  ticketRight: {
+    width: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 0,
+  },
+  ticketClaimBtn: {
+    backgroundColor: '#FFF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  ticketClaimBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+  },
+
+  voucherSeeMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  voucherSeeMoreText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
+    color: Colors.primary.default,
   },
 });
