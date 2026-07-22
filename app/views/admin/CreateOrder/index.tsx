@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, SlideInDown, SlideInLeft, SlideInRight } from 'react-native-reanimated';
 import { Colors } from '../../../../components/UI/Colors';
-import { Input } from '../../../../components/UI/Input';
 import api from '../../../../lib/axios';
 
 interface Product {
@@ -25,6 +24,7 @@ interface Product {
   price: number;
   image: string;
   category_id: number;
+  category_name?: string;
   is_customizable: boolean;
   rating: number;
 }
@@ -33,7 +33,7 @@ interface Category {
   id: number;
   name: string;
   slug: string;
-  icon: string;
+  icon?: string;
 }
 
 interface CustomizationOption {
@@ -59,7 +59,7 @@ interface OrderItem {
 export default function CreateOrderPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<number>(0); // 0 = All
   const [customizationOptions, setCustomizationOptions] = useState<Record<string, Record<string, CustomizationField>>>({});
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,9 +96,6 @@ export default function CreateOrderPage() {
       const res = await api.get('/categories');
       const cats = res.data.data || res.data || [];
       setCategories(cats);
-      if (cats.length > 0) {
-        setSelectedCategory(cats[0].id);
-      }
     } catch (err) {}
   };
 
@@ -133,7 +130,6 @@ export default function CreateOrderPage() {
     }
   };
 
-  // --- Product tap ---
   const handleProductPress = (product: Product) => {
     const config = customizationOptions[String(product.id)];
     if (product.is_customizable && config && Object.keys(config).length > 0) {
@@ -199,7 +195,7 @@ export default function CreateOrderPage() {
     setCustomSelections({});
   };
 
-  // --- Cart helpers ---
+  // Cart helpers
   const cartCount = orderItems.reduce((sum, i) => sum + i.quantity, 0);
 
   const removeItem = (index: number) => setOrderItems(prev => prev.filter((_, i) => i !== index));
@@ -253,17 +249,44 @@ export default function CreateOrderPage() {
     }
   };
 
-  // --- Filters ---
+  // Filters
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === null || p.category_id === selectedCategory;
+    const matchesCategory = selectedCategory === 0 || p.category_id === selectedCategory;
     return matchesSearch && matchesCategory;
   });
+
+  const getCategoryIcon = (catName: string) => {
+    const lower = catName.toLowerCase();
+    if (lower.includes('all')) return 'grid-outline';
+    if (lower.includes('pasalubong') || lower.includes('gift')) return 'gift-outline';
+    if (lower.includes('dessert') || lower.includes('cake')) return 'ice-cream-outline';
+    if (lower.includes('food') || lower.includes('meal') || lower.includes('snack')) return 'fast-food-outline';
+    if (lower.includes('drink') || lower.includes('coffee') || lower.includes('beverage')) return 'cafe-outline';
+    return 'restaurant-outline';
+  };
+
+  const getCategoryTagLabel = (item: Product) => {
+    if (item.category_name) return item.category_name;
+    const cat = categories.find(c => c.id === item.category_id);
+    if (cat) return cat.name;
+    const lowerName = item.name.toLowerCase();
+    if (lowerName.includes('brew') || lowerName.includes('cold')) return 'Cold Brew';
+    if (lowerName.includes('latte') || lowerName.includes('espresso') || lowerName.includes('cappuccino') || lowerName.includes('macchiato')) return 'Coffee';
+    if (lowerName.includes('dessert') || lowerName.includes('cake') || lowerName.includes('pie')) return 'Desserts';
+    if (lowerName.includes('pasalubong')) return 'Pasalubong';
+    return 'Coffee';
+  };
+
+  const categoryList: Category[] = [
+    { id: 0, name: 'All', slug: 'all', icon: 'grid-outline' },
+    ...categories,
+  ];
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary.default} />
+        <ActivityIndicator size="large" color="#2563EB" />
         <Text style={styles.loadingText}>Loading menu...</Text>
       </View>
     );
@@ -273,87 +296,187 @@ export default function CreateOrderPage() {
   if (currentView === 'cart') {
     return (
       <Animated.View entering={SlideInRight.duration(300)} style={styles.container}>
-        {/* Cart Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => setCurrentView('menu')} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={28} color={Colors.primary.default} />
+        {/* Cart Header with mascot emblem */}
+        <View style={styles.summaryHeader}>
+          <TouchableOpacity onPress={() => setCurrentView('menu')} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={22} color="#2563EB" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Order Summary</Text>
+
+          <View style={styles.summaryTitleCenter}>
+            <View style={styles.mascotWrapperSummary}>
+              <Image
+                source={require('../../../../assets/app/logo.png')}
+                style={styles.mascotImgSummary}
+                resizeMode="contain"
+              />
+              <Ionicons name="sparkles" size={10} color="#93C5FD" style={styles.sparkleSummaryLeft} />
+              <Ionicons name="sparkles" size={8} color="#93C5FD" style={styles.sparkleSummaryRight} />
+            </View>
+            <Text style={styles.summaryPageTitle}>Order Summary</Text>
+          </View>
+
           <View style={{ width: 44 }} />
         </View>
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
-          {/* Customer Info */}
-          <View style={styles.cartSection}>
-            <Text style={styles.cartSectionTitle}>Customer Info</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput
-                style={[styles.cartInput, { flex: 1 }]}
-                placeholder="Name (optional)"
-                placeholderTextColor={Colors.neutral.gray400}
-                value={customerName}
-                onChangeText={setCustomerName}
-              />
-              <TextInput
-                style={[styles.cartInput, { width: 80 }]}
-                placeholder="Table #"
-                placeholderTextColor={Colors.neutral.gray400}
-                value={tableNo}
-                onChangeText={setTableNo}
-                keyboardType="number-pad"
-              />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 120 }}>
+          {/* Customer Information Card */}
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryCardHeader}>
+              <View style={styles.summaryIconBadge}>
+                <Ionicons name="person" size={16} color="#2563EB" />
+              </View>
+              <Text style={styles.summaryCardTitle}>Customer Information</Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {/* Name field */}
+              <View style={styles.summaryInputPill}>
+                <Ionicons name="person-outline" size={16} color="#94A3B8" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.summaryTextInput}
+                  placeholder="Name (optional)"
+                  placeholderTextColor="#94A3B8"
+                  value={customerName}
+                  onChangeText={setCustomerName}
+                />
+              </View>
+
+              {/* Table # field */}
+              <View style={styles.summaryTablePill}>
+                <Ionicons name="restaurant-outline" size={16} color="#94A3B8" style={{ marginRight: 6 }} />
+                <TextInput
+                  style={styles.summaryTextInput}
+                  placeholder="Table #"
+                  placeholderTextColor="#94A3B8"
+                  value={tableNo}
+                  onChangeText={setTableNo}
+                  keyboardType="number-pad"
+                />
+              </View>
             </View>
           </View>
 
-          {/* Order Items */}
-          <View style={styles.cartSection}>
-            <Text style={styles.cartSectionTitle}>Items ({cartCount})</Text>
-            {orderItems.map((item, idx) => (
-              <View key={`${item.product.id}-${idx}`} style={styles.cartItemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cartItemName}>{item.product.name}</Text>
-                  {item.customization?.label ? <Text style={styles.cartItemCustom}>{item.customization.label}</Text> : null}
-                  <Text style={styles.cartItemPrice}>₱{getItemPrice(item).toFixed(2)}</Text>
-                </View>
-                <View style={styles.cartQtyRow}>
-                  <TouchableOpacity onPress={() => updateQuantity(idx, -1)} style={styles.qtyBtn}>
-                    <Ionicons name="remove" size={14} color="#FFF" />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyText}>{item.quantity}</Text>
-                  <TouchableOpacity onPress={() => updateQuantity(idx, 1)} style={styles.qtyBtn}>
-                    <Ionicons name="add" size={14} color="#FFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => removeItem(idx)} style={{ marginLeft: 10 }}>
-                    <Ionicons name="trash-outline" size={18} color={Colors.danger.default} />
-                  </TouchableOpacity>
-                </View>
+          {/* Items Card & Breakdown */}
+          <View style={styles.summaryCard}>
+            {/* Header */}
+            <View style={styles.summaryCardHeader}>
+              <View style={styles.summaryIconBadge}>
+                <Ionicons name="bag-handle" size={16} color="#2563EB" />
               </View>
-            ))}
+              <Text style={styles.summaryCardTitle}>Items ({cartCount})</Text>
+            </View>
+
+            {/* Item List */}
+            {orderItems.map((item, idx) => {
+              const basePrice = Number(item.product.price);
+              const extraPrice = item.customization?.extraPrice || 0;
+              const unitPrice = basePrice + extraPrice;
+              const itemTotal = unitPrice * item.quantity;
+              const subLabel = item.customization?.label || 'Steamed · Espresso Shot';
+
+              return (
+                <View key={`${item.product.id}-${idx}`} style={styles.summaryItemRow}>
+                  {/* Square Image */}
+                  {item.product.image ? (
+                    <Image source={{ uri: item.product.image }} style={styles.summaryItemImg} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.summaryItemImg, { backgroundColor: '#F1F5F9' }]} />
+                  )}
+
+                  {/* Details */}
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.summaryItemTitle} numberOfLines={1}>{item.product.name}</Text>
+                    <Text style={styles.summaryItemSubLabel} numberOfLines={1}>{subLabel}</Text>
+                    <Text style={styles.summaryItemPrice}>₱{itemTotal.toFixed(2)}</Text>
+                  </View>
+
+                  {/* Quantity & Trash */}
+                  <View style={styles.summaryItemActions}>
+                    <View style={styles.summaryQtyPill}>
+                      <TouchableOpacity onPress={() => updateQuantity(idx, -1)} style={styles.summaryQtyBtn}>
+                        <Ionicons name="remove" size={12} color="#2563EB" />
+                      </TouchableOpacity>
+                      <Text style={styles.summaryQtyVal}>{item.quantity}</Text>
+                      <TouchableOpacity onPress={() => updateQuantity(idx, 1)} style={styles.summaryQtyBtn}>
+                        <Ionicons name="add" size={12} color="#2563EB" />
+                      </TouchableOpacity>
+                    </View>
+
+                    <TouchableOpacity onPress={() => removeItem(idx)} style={styles.summaryTrashBtn}>
+                      <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Separator Line */}
+            <View style={styles.summaryDashedLine} />
+
+            {/* Order Breakdown Section */}
+            <View style={styles.summaryCardHeader}>
+              <View style={styles.summaryIconBadge}>
+                <Ionicons name="receipt-outline" size={16} color="#2563EB" />
+              </View>
+              <Text style={styles.summaryCardTitle}>Order Breakdown</Text>
+            </View>
+
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Subtotal</Text>
+              <Text style={styles.breakdownVal}>₱{getTotal().toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Discount</Text>
+              <Text style={styles.breakdownValGreen}>-₱0.00</Text>
+            </View>
+
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Tax (0%)</Text>
+              <Text style={styles.breakdownVal}>₱0.00</Text>
+            </View>
+
+            {/* Total Pill */}
+            <View style={styles.summaryTotalPill}>
+              <Text style={styles.summaryTotalPillLabel}>Total</Text>
+              <Text style={styles.summaryTotalPillValue}>₱{getTotal().toFixed(2)}</Text>
+            </View>
           </View>
 
-          {/* Total */}
-          <View style={styles.cartTotalRow}>
-            <Text style={styles.cartTotalLabel}>Total</Text>
-            <Text style={styles.cartTotalValue}>₱{getTotal().toFixed(2)}</Text>
+          {/* Cloud Mascot Hint Speech Banner */}
+          <View style={styles.speechBannerContainer}>
+            <View style={styles.speechMascotWrapper}>
+              <Image 
+                source={require('../../../../assets/app/logo.png')} 
+                style={styles.speechMascotImg} 
+                resizeMode="contain" 
+              />
+            </View>
+            <View style={styles.speechBubblePill}>
+              <Text style={styles.speechBubbleText}>You're just one step away from your coffee! 💙</Text>
+            </View>
           </View>
-        </ScrollView>
 
-        {/* Submit Button */}
-        <View style={styles.cartFooter}>
+          {/* Create Order Blue Action Bar */}
           <TouchableOpacity
-            style={[styles.submitBtn, (orderItems.length === 0 || submitting) && { opacity: 0.5 }]}
+            style={[styles.createOrderActionBtn, (orderItems.length === 0 || submitting) && { opacity: 0.5 }]}
             onPress={handleSubmit}
             disabled={orderItems.length === 0 || submitting}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
-            {submitting ? <ActivityIndicator color="#FFF" /> : (
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
               <>
-                <Ionicons name="checkmark-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={styles.submitBtnText}>Create Order</Text>
+                <View style={styles.createOrderIconCircle}>
+                  <Ionicons name="cafe" size={18} color="#2563EB" />
+                </View>
+                <Text style={styles.createOrderActionBtnText}>Create Order</Text>
+                <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
               </>
             )}
           </TouchableOpacity>
-        </View>
+        </ScrollView>
 
         {/* Custom Alert Modal (inside cart view) */}
         <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={() => {}}>
@@ -384,7 +507,7 @@ export default function CreateOrderPage() {
                   styles.alertBtn,
                   alertConfig.type === 'success' && { backgroundColor: '#4CAF50' },
                   alertConfig.type === 'error' && { backgroundColor: '#F44336' },
-                  alertConfig.type === 'info' && { backgroundColor: Colors.primary.default },
+                  alertConfig.type === 'info' && { backgroundColor: '#2563EB' },
                 ]}
                 onPress={() => {
                   setAlertConfig(prev => ({ ...prev, visible: false }));
@@ -402,66 +525,89 @@ export default function CreateOrderPage() {
     );
   }
 
-  // ====== MENU VIEW (OurMenu Style) ======
+  // ====== MENU VIEW ======
   return (
-    <Animated.View entering={SlideInDown.duration(400)} style={styles.container}>
-      {/* Header with Cart Icon */}
-      <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.header}>
-        <View style={{ width: 44 }} />
-        <Text style={styles.headerTitle}>Create Order</Text>
-        <TouchableOpacity onPress={() => setCurrentView('cart')} style={styles.cartIconBtn}>
-          <Ionicons name="cart" size={24} color={Colors.primary.default} />
+    <View style={styles.container}>
+      {/* Top Header with Mascot & Cart */}
+      <View style={styles.header}>
+        <View style={styles.headerTitleCenter}>
+          <View style={styles.mascotWrapper}>
+            <Image
+              source={require('../../../../assets/app/logo.png')}
+              style={styles.mascotImg}
+              resizeMode="contain"
+            />
+            <Ionicons name="sparkles" size={12} color="#93C5FD" style={styles.sparkleLeft} />
+            <Ionicons name="sparkles" size={10} color="#93C5FD" style={styles.sparkleRight} />
+          </View>
+          <Text style={styles.pageTitle}>Create Order</Text>
+        </View>
+
+        <TouchableOpacity onPress={() => setCurrentView('cart')} style={styles.cartIconBtn} activeOpacity={0.85}>
+          <Ionicons name="cart" size={22} color="#2563EB" />
           {cartCount > 0 && (
             <View style={styles.cartBadge}>
               <Text style={styles.cartBadgeText}>{cartCount}</Text>
             </View>
           )}
         </TouchableOpacity>
-      </Animated.View>
+      </View>
 
-      {/* Search */}
-      <Animated.View entering={SlideInRight.delay(300).duration(400)} style={styles.searchWrap}>
-        <Input
-          placeholder="Search products..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          leftIcon={<Ionicons name="search-outline" size={18} color={Colors.primary.default} />}
-          rightIcon={searchQuery ? (
+      {/* Search Input & Filter Button */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputPill}>
+          <Ionicons name="search-outline" size={18} color="#94A3B8" style={{ marginRight: 8 }} />
+          <TextInput
+            style={styles.searchInputText}
+            placeholder="Search products..."
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={16} color={Colors.neutral.gray500} />
+              <Ionicons name="close-circle" size={16} color="#CBD5E1" />
             </TouchableOpacity>
           ) : null}
+        </View>
+
+        <TouchableOpacity style={styles.filterBtn} activeOpacity={0.85}>
+          <Ionicons name="options-outline" size={20} color="#1E293B" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Horizontal Category Chips */}
+      <View style={styles.categoriesSection}>
+        <FlatList
+          data={categoryList}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={styles.categoriesList}
+          renderItem={({ item }) => {
+            const isActive = selectedCategory === item.id;
+            const iconName = item.icon || getCategoryIcon(item.name);
+            return (
+              <TouchableOpacity
+                style={[styles.categoryChip, isActive && styles.categoryChipActive]}
+                onPress={() => setSelectedCategory(item.id)}
+                activeOpacity={0.85}
+              >
+                <Ionicons 
+                  name={iconName as any} 
+                  size={15} 
+                  color={isActive ? '#FFFFFF' : '#2563EB'} 
+                />
+                <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
         />
-      </Animated.View>
+      </View>
 
-      {/* Category Tabs */}
-      {categories.length > 0 && (
-        <Animated.View entering={SlideInLeft.delay(400).duration(400)} style={styles.categoriesSection}>
-          <FlatList
-            data={categories}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(item) => String(item.id)}
-            contentContainerStyle={styles.categoriesList}
-            renderItem={({ item }) => {
-              const isActive = selectedCategory === item.id;
-              return (
-                <TouchableOpacity
-                  style={[styles.categoryBtn, isActive && styles.categoryBtnActive]}
-                  onPress={() => setSelectedCategory(item.id)}
-                >
-                  {item.icon && (
-                    <Ionicons name={item.icon as any} size={14} color={isActive ? '#FFF' : Colors.primary.default} />
-                  )}
-                  <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>{item.name}</Text>
-                </TouchableOpacity>
-              );
-            }}
-          />
-        </Animated.View>
-      )}
-
-      {/* Products Grid (same as OurMenu) */}
+      {/* 2-Column Product Grid */}
       <FlatList
         data={filteredProducts}
         keyExtractor={(item) => String(item.id)}
@@ -471,43 +617,62 @@ export default function CreateOrderPage() {
         contentContainerStyle={styles.gridBody}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="cafe-outline" size={48} color={Colors.neutral.gray400} />
+            <Ionicons name="cafe-outline" size={48} color="#CBD5E1" />
             <Text style={styles.emptyText}>No products found.</Text>
           </View>
         }
-        renderItem={({ item, index }) => {
-          const hasCustomization = item.is_customizable && !!customizationOptions[String(item.id)];
+        renderItem={({ item }) => {
+          const categoryTag = getCategoryTagLabel(item);
+          const numRating = Number(item.rating);
+          const ratingVal = !isNaN(numRating) && numRating > 0 ? numRating.toFixed(1) : '4.8';
+
           return (
-            <Animated.View
-              entering={index % 2 === 0 ? SlideInLeft.delay(450 + index * 40).duration(400) : SlideInRight.delay(450 + index * 40).duration(400)}
-              style={styles.gridCardWrapper}
+            <TouchableOpacity 
+              style={styles.gridCard}
+              onPress={() => handleProductPress(item)}
+              activeOpacity={0.9}
             >
-              <View style={styles.gridCard}>
-                {item.image ? <Image source={{ uri: item.image }} style={styles.gridImage} /> : <View style={[styles.gridImage, { backgroundColor: '#F0EDE5' }]} />}
-                {item.rating > 0 && (
-                  <View style={styles.ratingBadgeMini}>
-                    <Ionicons name="star" size={10} color="#F4A261" />
-                    <Text style={styles.ratingTextMini}>{item.rating}</Text>
-                  </View>
+              {/* Product Image & Badges */}
+              <View style={styles.imageContainer}>
+                {item.image ? (
+                  <Image source={{ uri: item.image }} style={styles.productImg} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.productImg, { backgroundColor: '#F1F5F9' }]} />
                 )}
-                {hasCustomization && (
-                  <View style={styles.customizableMini}>
-                    <Ionicons name="options-outline" size={9} color={Colors.secondary.default} />
-                    <Text style={styles.customizableMiniText}>Custom</Text>
-                  </View>
-                )}
-                <View style={styles.gridContent}>
-                  <Text style={styles.gridName} numberOfLines={1}>{item.name}</Text>
-                  {item.description ? <Text style={styles.gridDesc} numberOfLines={1}>{item.description}</Text> : null}
-                  <View style={styles.gridFooter}>
-                    <Text style={styles.gridPrice}>₱{Number(item.price).toFixed(2)}</Text>
-                    <TouchableOpacity style={styles.addButtonMini} onPress={() => handleProductPress(item)} activeOpacity={0.85}>
-                      <Ionicons name="add" size={16} color="#FFF" />
-                    </TouchableOpacity>
-                  </View>
+
+                {/* Top-Left Category Tag */}
+                <View style={styles.categoryTagPill}>
+                  <Text style={styles.categoryTagText}>{categoryTag}</Text>
+                </View>
+
+                {/* Top-Right Rating Tag */}
+                <View style={styles.ratingTagPill}>
+                  <Ionicons name="star" size={10} color="#F59E0B" style={{ marginRight: 2 }} />
+                  <Text style={styles.ratingTagText}>{ratingVal}</Text>
                 </View>
               </View>
-            </Animated.View>
+
+              {/* Product Info */}
+              <View style={styles.cardContent}>
+                <Text style={styles.productTitle} numberOfLines={1}>{item.name}</Text>
+                <Text style={styles.productDesc} numberOfLines={2}>
+                  {item.description || 'Rich espresso combined with smooth milk.'}
+                </Text>
+
+                {/* Price & Add Button Row */}
+                <View style={styles.cardFooter}>
+                  <Text style={styles.productPrice}>₱{Number(item.price).toFixed(2)}</Text>
+
+                  <TouchableOpacity 
+                    style={styles.addBtnCircle} 
+                    onPress={() => handleProductPress(item)} 
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="add" size={18} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
           );
         }}
       />
@@ -530,7 +695,7 @@ export default function CreateOrderPage() {
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>Customize: {customizingProduct.name}</Text>
                     <TouchableOpacity onPress={() => setCustomizingProduct(null)}>
-                      <Ionicons name="close-circle" size={28} color={Colors.neutral.gray500} />
+                      <Ionicons name="close-circle" size={26} color="#94A3B8" />
                     </TouchableOpacity>
                   </View>
                   <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
@@ -587,7 +752,6 @@ export default function CreateOrderPage() {
       <Modal visible={alertConfig.visible} transparent animationType="fade" onRequestClose={() => {}}>
         <View style={styles.alertOverlay}>
           <View style={styles.alertCard}>
-            {/* Icon */}
             <View style={[
               styles.alertIconCircle,
               alertConfig.type === 'success' && { backgroundColor: '#E8F5E9' },
@@ -607,17 +771,15 @@ export default function CreateOrderPage() {
               />
             </View>
 
-            {/* Text */}
             <Text style={styles.alertTitle}>{alertConfig.title}</Text>
             <Text style={styles.alertMessage}>{alertConfig.message}</Text>
 
-            {/* Button */}
             <TouchableOpacity
               style={[
                 styles.alertBtn,
                 alertConfig.type === 'success' && { backgroundColor: '#4CAF50' },
                 alertConfig.type === 'error' && { backgroundColor: '#F44336' },
-                alertConfig.type === 'info' && { backgroundColor: Colors.primary.default },
+                alertConfig.type === 'info' && { backgroundColor: '#2563EB' },
               ]}
               onPress={() => {
                 setAlertConfig(prev => ({ ...prev, visible: false }));
@@ -630,96 +792,711 @@ export default function CreateOrderPage() {
           </View>
         </View>
       </Modal>
-
-    </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAF9F5' },
-  loadingContainer: { flex: 1, backgroundColor: '#FAF9F5', justifyContent: 'center', alignItems: 'center' },
-  loadingText: { fontFamily: 'Poppins', fontSize: 14, color: Colors.neutral.gray500, marginTop: 12 },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#F8FAFC',
+  },
+  loadingContainer: { 
+    flex: 1, 
+    backgroundColor: '#F8FAFC', 
+    justifyContent: 'center', 
+    alignItems: 'center',
+  },
+  loadingText: { 
+    fontFamily: 'Poppins-Medium', 
+    fontSize: 13, 
+    color: '#64748B', 
+    marginTop: 12,
+  },
 
   // Header
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 56 : 36, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: Colors.neutral.gray200,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'ios' ? 56 : 38,
+    paddingBottom: 10,
+    backgroundColor: '#F8FAFC',
   },
-  headerTitle: { fontFamily: 'Poppins-Bold', fontSize: 18, color: Colors.primary.default },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F3F0E6', justifyContent: 'center', alignItems: 'center' },
-  cartIconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F3F0E6', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  cartBadge: { position: 'absolute', top: 2, right: 2, backgroundColor: Colors.danger.default, borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
-  cartBadgeText: { fontFamily: 'Poppins-Bold', fontSize: 9, color: '#FFF' },
+  headerTitleCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mascotWrapper: {
+    width: 48,
+    height: 48,
+    position: 'relative',
+    marginBottom: 2,
+  },
+  mascotImg: {
+    width: '100%',
+    height: '100%',
+  },
+  sparkleLeft: {
+    position: 'absolute',
+    top: -2,
+    left: -4,
+  },
+  sparkleRight: {
+    position: 'absolute',
+    top: 8,
+    right: -6,
+  },
+  pageTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 22,
+    color: '#2563EB',
+    lineHeight: 26,
+  },
+  cartIconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#2563EB',
+    borderRadius: 9,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  cartBadgeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#FFFFFF',
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  headerTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 18,
+    color: '#1E293B',
+  },
 
-  // Search
-  searchWrap: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 8 },
+  // Search & Filter
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 14,
+    gap: 10,
+  },
+  searchInputPill: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  searchInputText: {
+    flex: 1,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+    color: '#1E293B',
+  },
+  filterBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
 
-  // Categories
-  categoriesSection: { marginBottom: 10 },
-  categoriesList: { paddingHorizontal: 24, paddingVertical: 6, gap: 8 },
-  categoryBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 16, backgroundColor: '#FAF9F5', borderWidth: 1, borderColor: Colors.neutral.gray300, gap: 6 },
-  categoryBtnActive: { backgroundColor: Colors.primary.default, borderColor: Colors.primary.default },
-  categoryText: { fontFamily: 'Poppins-Bold', fontSize: 11, color: Colors.primary.default },
-  categoryTextActive: { color: '#FAF9F5' },
+  // Horizontal Category Chips
+  categoriesSection: {
+    marginBottom: 12,
+  },
+  categoriesList: {
+    paddingHorizontal: 24,
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  categoryChipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  categoryChipText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
+    color: '#334155',
+  },
+  categoryChipTextActive: {
+    color: '#FFFFFF',
+  },
 
-  // Grid (OurMenu style)
-  gridBody: { paddingHorizontal: 24, paddingBottom: 40 },
-  gridRow: { justifyContent: 'space-between' },
-  gridCardWrapper: { width: '48%' },
-  gridCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 10, marginBottom: 16, borderWidth: 1, borderColor: Colors.neutral.gray200, shadowColor: Colors.primary.default, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2, position: 'relative' },
-  gridImage: { width: '100%', height: 100, borderRadius: 12 },
-  ratingBadgeMini: { position: 'absolute', top: 16, right: 16, backgroundColor: 'rgba(255,255,255,0.9)', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 6, gap: 2 },
-  ratingTextMini: { fontFamily: 'Poppins-Bold', fontSize: 9, color: '#D48C46' },
-  customizableMini: { position: 'absolute', top: 16, left: 16, backgroundColor: 'rgba(255,255,255,0.9)', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 6, gap: 3 },
-  customizableMiniText: { fontFamily: 'Poppins-Bold', fontSize: 8, color: Colors.secondary.default },
-  gridContent: { marginTop: 10 },
-  gridName: { fontFamily: 'Poppins-Bold', fontSize: 13, color: Colors.neutral.gray900 },
-  gridDesc: { fontFamily: 'Poppins', fontSize: 10, color: Colors.neutral.gray500, marginTop: 2 },
-  gridFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
-  gridPrice: { fontFamily: 'Poppins-Bold', fontSize: 13, color: Colors.secondary.default },
-  addButtonMini: { backgroundColor: Colors.secondary.default, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center', shadowColor: Colors.secondary.default, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 2 },
-  emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  emptyText: { fontFamily: 'Poppins', fontSize: 14, color: Colors.neutral.gray600, marginTop: 10 },
+  // 2-Column Product Grid
+  gridBody: {
+    paddingHorizontal: 24,
+    paddingBottom: 90,
+  },
+  gridRow: {
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  gridCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  imageContainer: {
+    width: '100%',
+    height: 130,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  productImg: {
+    width: '100%',
+    height: '100%',
+  },
+  categoryTagPill: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  categoryTagText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#1D5FA7',
+  },
+  ratingTagPill: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  ratingTagText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#1E293B',
+  },
+  cardContent: {
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  productTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#1E293B',
+  },
+  productDesc: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 10,
+    color: '#64748B',
+    lineHeight: 13,
+    marginTop: 2,
+    height: 26,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  productPrice: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#1D5FA7',
+  },
+  addBtnCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 50,
+  },
+  emptyText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+    color: '#94A3B8',
+    marginTop: 8,
+  },
 
-  // Cart View
-  cartSection: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
-  cartSectionTitle: { fontFamily: 'Poppins-Bold', fontSize: 15, color: Colors.primary.default, marginBottom: 12 },
-  cartInput: { backgroundColor: '#F7F5F0', borderRadius: 10, padding: 12, fontFamily: 'Poppins', fontSize: 14, color: '#333' },
-  cartItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0EDE5' },
-  cartItemName: { fontFamily: 'Poppins-SemiBold', fontSize: 13, color: '#333' },
-  cartItemCustom: { fontFamily: 'Poppins', fontSize: 11, color: Colors.primary.default, marginTop: 2 },
-  cartItemPrice: { fontFamily: 'Poppins', fontSize: 12, color: Colors.neutral.gray600, marginTop: 2 },
-  cartQtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  qtyBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: Colors.primary.default, alignItems: 'center', justifyContent: 'center' },
-  qtyText: { fontFamily: 'Poppins-Bold', fontSize: 14, color: '#333', minWidth: 20, textAlign: 'center' },
-  cartTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 16, borderTopWidth: 2, borderTopColor: Colors.primary.default },
-  cartTotalLabel: { fontFamily: 'Poppins-Bold', fontSize: 18, color: '#333' },
-  cartTotalValue: { fontFamily: 'Poppins-Bold', fontSize: 22, color: Colors.primary.default },
-  cartFooter: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: Platform.OS === 'ios' ? 34 : 16, backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0EDE5' },
-  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary.default, borderRadius: 14, paddingVertical: 16 },
-  submitBtnText: { fontFamily: 'Poppins-Bold', fontSize: 16, color: '#FFF' },
+  // Order Summary View Styles
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 56 : 38,
+    paddingBottom: 10,
+    backgroundColor: '#F8FAFC',
+  },
+  backBtnCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  summaryTitleCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mascotWrapperSummary: {
+    width: 40,
+    height: 40,
+    position: 'relative',
+    marginBottom: 2,
+  },
+  mascotImgSummary: {
+    width: '100%',
+    height: '100%',
+  },
+  sparkleSummaryLeft: {
+    position: 'absolute',
+    top: -2,
+    left: -4,
+  },
+  sparkleSummaryRight: {
+    position: 'absolute',
+    top: 6,
+    right: -6,
+  },
+  summaryPageTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 22,
+    color: '#1E293B',
+  },
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  summaryCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  summaryIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  summaryCardTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 15,
+    color: '#1E293B',
+  },
+  summaryInputPill: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  summaryTablePill: {
+    width: 120,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  summaryTextInput: {
+    flex: 1,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+    color: '#1E293B',
+  },
+  summaryItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  summaryItemImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
+  },
+  summaryItemTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#1E293B',
+  },
+  summaryItemSubLabel: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    color: '#3B82F6',
+    marginVertical: 2,
+  },
+  summaryItemPrice: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#1E293B',
+  },
+  summaryItemActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  summaryQtyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 6,
+  },
+  summaryQtyBtn: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryQtyVal: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E293B',
+    marginHorizontal: 8,
+  },
+  summaryTrashBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryDashedLine: {
+    height: 1,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+    marginVertical: 14,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  breakdownLabel: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 13,
+    color: '#64748B',
+  },
+  breakdownVal: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 13,
+    color: '#1E293B',
+  },
+  breakdownValGreen: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#16A34A',
+  },
+  summaryTotalPill: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 10,
+  },
+  summaryTotalPillLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#2563EB',
+  },
+  summaryTotalPillValue: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 20,
+    color: '#2563EB',
+  },
+  speechBannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 4,
+  },
+  speechMascotWrapper: {
+    width: 44,
+    height: 44,
+    marginRight: 8,
+  },
+  speechMascotImg: {
+    width: '100%',
+    height: '100%',
+  },
+  speechBubblePill: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  speechBubbleText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    color: '#475569',
+  },
+  createOrderActionBtn: {
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+    marginBottom: 20,
+  },
+  createOrderIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createOrderActionBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
 
   // Customization Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingBottom: Platform.OS === 'ios' ? 34 : 16 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F0EDE5' },
-  modalTitle: { fontFamily: 'Poppins-Bold', fontSize: 16, color: '#333', flex: 1, marginRight: 12 },
-  modalBody: { paddingHorizontal: 20, paddingTop: 16, maxHeight: 400 },
-  fieldSection: { marginBottom: 20 },
-  fieldLabel: { fontFamily: 'Poppins-Bold', fontSize: 14, color: '#333', marginBottom: 10 },
-  fieldHint: { fontFamily: 'Poppins', fontSize: 11, color: Colors.neutral.gray400 },
-  optionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  optionChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7F5F0', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1.5, borderColor: '#E8E4DC' },
-  optionChipActive: { backgroundColor: Colors.primary.default, borderColor: Colors.primary.default },
-  optionName: { fontFamily: 'Poppins-SemiBold', fontSize: 13, color: '#333' },
-  optionNameActive: { color: '#FFF' },
-  optionPrice: { fontFamily: 'Poppins', fontSize: 11, color: Colors.neutral.gray500, marginLeft: 6 },
-  optionPriceActive: { color: 'rgba(255,255,255,0.8)' },
-  modalFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0EDE5' },
-  modalPriceText: { fontFamily: 'Poppins-Bold', fontSize: 20, color: Colors.primary.default },
-  modalAddBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.primary.default, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  modalAddBtnText: { fontFamily: 'Poppins-Bold', fontSize: 14, color: '#FFF', marginLeft: 6 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '85%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  modalTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#1E293B',
+    flex: 1,
+    marginRight: 12,
+  },
+  modalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    maxHeight: 400,
+  },
+  fieldSection: {
+    marginBottom: 18,
+  },
+  fieldLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E293B',
+    marginBottom: 8,
+  },
+  fieldHint: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 10,
+    color: '#94A3B8',
+  },
+  optionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  optionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+  },
+  optionChipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  optionName: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 12,
+    color: '#334155',
+  },
+  optionNameActive: {
+    color: '#FFFFFF',
+  },
+  optionPrice: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 10,
+    color: '#64748B',
+    marginLeft: 6,
+  },
+  optionPriceActive: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  modalPriceText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 20,
+    color: '#1E293B',
+  },
+  modalAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2563EB',
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  modalAddBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#FFFFFF',
+    marginLeft: 4,
+  },
 
   // Custom Alert
   alertOverlay: {
@@ -730,9 +1507,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   alertCard: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 24,
-    padding: 28,
+    padding: 24,
     alignItems: 'center',
     width: '100%',
     shadowColor: '#000',
@@ -742,15 +1519,38 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   alertIconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  alertTitle: { fontFamily: 'Poppins-Bold', fontSize: 18, color: '#333', marginBottom: 8, textAlign: 'center' },
-  alertMessage: { fontFamily: 'Poppins', fontSize: 14, color: Colors.neutral.gray600, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
-  alertBtn: { paddingVertical: 14, paddingHorizontal: 40, borderRadius: 14, minWidth: 140, alignItems: 'center' },
-  alertBtnText: { fontFamily: 'Poppins-Bold', fontSize: 15, color: '#FFF' },
+  alertTitle: { 
+    fontFamily: 'Poppins-Bold', 
+    fontSize: 18, 
+    color: '#1E293B', 
+    marginBottom: 8, 
+    textAlign: 'center',
+  },
+  alertMessage: { 
+    fontFamily: 'Poppins-Regular', 
+    fontSize: 13, 
+    color: '#64748B', 
+    textAlign: 'center', 
+    lineHeight: 20, 
+    marginBottom: 20,
+  },
+  alertBtn: { 
+    paddingVertical: 12, 
+    paddingHorizontal: 36, 
+    borderRadius: 14, 
+    minWidth: 130, 
+    alignItems: 'center',
+  },
+  alertBtnText: { 
+    fontFamily: 'Poppins-Bold', 
+    fontSize: 14, 
+    color: '#FFFFFF',
+  },
 });

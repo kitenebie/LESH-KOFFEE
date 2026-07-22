@@ -54,10 +54,13 @@ interface CartViewProps {
   subscriptionBalance: number;
   cartTotal: number;
   grandTotal: number;
+  deliveryFee: number;
   subscriptionDiscount: number;
   voucherDiscount: number;
   perkDiscount?: number;
   perksApplied?: any[];
+  subscriptionName?: string | null;
+  serverVouchers?: { code: string; label?: string; discount: number; type: string }[];
   appliedVouchers: { code: string; discount: number; label: string; type?: string; max_discount?: number; min_order_amount?: number | null }[];
   setAppliedVouchers: (v: any) => void;
   voucherCode: string;
@@ -81,10 +84,13 @@ export default function CartView({
   subscriptionBalance,
   cartTotal,
   grandTotal,
+  deliveryFee,
   subscriptionDiscount,
   voucherDiscount,
   perkDiscount = 0,
   perksApplied = [],
+  subscriptionName = null,
+  serverVouchers = [],
   appliedVouchers,
   setAppliedVouchers,
   voucherCode,
@@ -395,48 +401,45 @@ export default function CartView({
               <Text style={styles.summaryVal}>₱{cartTotal.toFixed(2)}</Text>
             </View>
 
-            {fulfillmentMode === 'Delivery' && (
+            {deliveryFee > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Delivery Fee</Text>
-                <Text style={styles.summaryVal}>₱49.00</Text>
+                <Text style={styles.summaryVal}>₱{deliveryFee.toFixed(2)}</Text>
               </View>
             )}
 
             {subscriptionDiscount > 0 && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Subscription Discount</Text>
+                <Text style={styles.summaryLabel}>
+                  {subscriptionName ? `☕ ${subscriptionName}` : 'Subscription Discount'}
+                </Text>
                 <Text style={[styles.summaryVal, { color: '#4CAF50' }]}>-₱{subscriptionDiscount.toFixed(2)}</Text>
               </View>
             )}
 
             {perkDiscount > 0 && perksApplied.length > 0 && (
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>
-                  {perksApplied.map(p => `${p.discount_type === 'percent' ? p.discount_value + '%' : '₱' + p.discount_value} ${p.category_name}`).join(', ')}
-                </Text>
-                <Text style={[styles.summaryVal, { color: '#4CAF50' }]}>-₱{perkDiscount.toFixed(2)}</Text>
-              </View>
+              <>
+                {perksApplied.map((p, i) => (
+                  <View key={`perk-${i}`} style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>
+                      🎁 {p.discount_type === 'percent' ? `${p.discount_value}%` : `₱${p.discount_value}`} off {p.category_name}
+                    </Text>
+                    <Text style={[styles.summaryVal, { color: '#4CAF50' }]}>-₱{Number(p.applied_discount || 0).toFixed(2)}</Text>
+                  </View>
+                ))}
+              </>
             )}
 
-            {appliedVouchers.length > 0 && voucherDiscount > 0 && (
+            {serverVouchers.length > 0 && voucherDiscount > 0 && (
               <>
-                {appliedVouchers.map((v) => {
-                  const minReq = v.min_order_amount ? Number(v.min_order_amount) : 0;
-                  const meetsMin = minReq <= 0 || cartTotal >= minReq;
-                  const canApplyFixed = v.type !== 'fixed' || cartTotal >= v.discount;
-                  const applicable = meetsMin && canApplyFixed;
-                  const discountAmt = applicable
-                    ? (v.type === 'fixed' ? v.discount : Math.min(v.discount * cartTotal, v.max_discount || Infinity))
-                    : 0;
-                  return (
-                    <View key={v.code} style={styles.summaryRow}>
-                      <Text style={styles.summaryLabel}>Voucher ({v.code})</Text>
-                      <Text style={[styles.summaryVal, { color: applicable ? '#4CAF50' : Colors.neutral.gray400 }]}>
-                        {applicable ? `-₱${discountAmt.toFixed(2)}` : 'Not applicable'}
-                      </Text>
-                    </View>
-                  );
-                })}
+                {serverVouchers.map((v) => (
+                  <View key={v.code} style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>🏷️ {v.label || v.code}</Text>
+                    <Text style={[styles.summaryVal, { color: '#4CAF50' }]}>
+                      -₱{Number(v.discount).toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
               </>
             )}
 
@@ -450,7 +453,6 @@ export default function CartView({
                 <Text style={styles.paymentTitle}>Payment Method</Text>
                 <View style={{ flexDirection: 'row', marginBottom: 12 }}>
                   {[
-                    { key: 'Wallet', label: 'LESH Wallet', icon: 'wallet-outline' as const },
                     { key: 'COD', label: fulfillmentMode === 'DineIn' ? 'Cash' : 'COD', icon: 'cash-outline' as const },
                     { key: 'CardEWallet', label: 'Card & E-wallet', icon: 'card-outline' as const }
                   ].map((method) => (
@@ -476,14 +478,14 @@ export default function CartView({
               <View style={styles.walletCheckoutTeaser}>
                 <Ionicons name="wallet-outline" size={16} color={Colors.primary.default} style={{ marginRight: 6 }} />
                 <Text style={styles.walletTeaserBalanceText}>
-                  Lesh Wallet: <Text style={styles.boldWalletVal}>₱{walletBalance.toFixed(2)}</Text>
+                  Foam Wallet: <Text style={styles.boldWalletVal}>₱{walletBalance.toFixed(2)}</Text>
                 </Text>
               </View>
             )}
 
             <Button
               title={
-                paymentMethod === 'COD' ? "Generate Order Code" 
+                paymentMethod === 'COD' ? (fulfillmentMode === 'Delivery' ? "Place Delivery Order" : "Generate Order Code")
                 : paymentMethod === 'Wallet' ? "Pay with Wallet" 
                 : paymentMethod === 'CardEWallet' ? "Pay with Card / E-wallet"
                 : "Place Order"
@@ -538,58 +540,152 @@ export default function CartView({
             </View>
           </View>
 
-          <ScrollView contentContainerStyle={styles.voucherPickerGrid} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={styles.voucherPickerList} showsVerticalScrollIndicator={false}>
             {dummyData.vouchers && dummyData.vouchers.map((v: any, idx: number) => {
-              const cardColors = [Colors.secondary.default, '#5B8A72', '#C67B5C', '#6B5CA5'];
+              const cardColors = [Colors.primary.default, '#4299E1', '#3182CE', '#1B4D86'];
               const bgColor = cardColors[idx % cardColors.length];
               const isSelected = appliedVouchers.some(av => av.code === v.code);
               const minOrder = v.min_order_amount ? Number(v.min_order_amount) : 0;
               const meetsMinimum = minOrder <= 0 || cartTotal >= minOrder;
-              // Also disable fixed-type vouchers where discount > subtotal
               const fixedExceedsSubtotal = v.type === 'fixed' && Number(v.discount) > cartTotal;
               const isDisabled = !meetsMinimum || fixedExceedsSubtotal;
+
+              const discountValue = v.type === 'percent'
+                ? `${(v.discount * 100).toFixed(0)}%`
+                : `₱${Number(v.discount).toFixed(0)}`;
 
               return (
                 <TouchableOpacity
                   key={v.id || v.code}
                   style={[
-                    styles.voucherPickerCard,
-                    { backgroundColor: isDisabled ? Colors.neutral.gray300 : bgColor },
-                    isSelected && styles.voucherPickerCardSelected,
-                    isDisabled && { opacity: 0.6 },
+                    styles.ticketCardPopup,
+                    isDisabled && { opacity: 0.6 }
                   ]}
                   activeOpacity={0.8}
                   onPress={() => !isDisabled && toggleVoucherSelection({ code: v.code, discount: v.discount, label: v.label, type: v.type, max_discount: v.max_discount, min_order_amount: v.min_order_amount })}
                   disabled={isDisabled}
                 >
-                  {isSelected && (
-                    <View style={styles.voucherPickerCheckmark}>
-                      <Ionicons name="checkmark-circle" size={22} color="#FFF" />
+                  {/* Physical Ticket Edge Cutouts (Punched Holes) */}
+                  <View style={styles.topCenterCutoutPopup} />
+                  <View style={styles.bottomCenterCutoutPopup} />
+                  <View style={styles.leftEdgeCutoutPopup} />
+                  <View style={styles.rightEdgeCutoutPopup} />
+
+                  {/* LEFT TICKET (Main Body - Cream base) */}
+                  <View style={styles.leftTicketPopup}>
+                    {/* Top Left Brand Logo */}
+                    <View style={styles.logoBlockPopup}>
+                      <Image 
+                        source={require('../../../assets/app/logo.png')} 
+                        style={styles.logoImgPopup} 
+                        resizeMode="contain" 
+                      />
+                      <View style={styles.logoDividerPopup} />
+                      <View style={styles.logoTextContainerPopup}>
+                        <Text style={styles.logoTitlePopup}>fōam</Text>
+                        <Text style={styles.logoSubtitlePopup}>coffee</Text>
+                      </View>
                     </View>
-                  )}
-                  <Text style={styles.voucherPickerCardLabel} numberOfLines={2}>{v.label}</Text>
-                  {Number(v.discount) > 0 && (
-                    <Text style={styles.voucherPickerCardDiscount}>
-                      {v.type === 'percent' ? `${(v.discount * 100).toFixed(0)}% OFF` : `₱${Number(v.discount).toFixed(0)} OFF`}
-                    </Text>
-                  )}
-                  {v.type === 'percent' && v.max_discount && (
-                    <Text style={{ fontFamily: 'Poppins', fontSize: 8, color: 'rgba(255,255,255,0.7)', marginTop: -2 }}>
-                      max ₱{Number(v.max_discount).toFixed(0)}
-                    </Text>
-                  )}
-                  {minOrder > 0 && (
-                    <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 8, color: meetsMinimum ? 'rgba(255,255,255,0.8)' : '#FFCDD2', marginTop: 4 }}>
-                      {meetsMinimum ? `Min: ₱${minOrder}` : `Need ₱${(minOrder - cartTotal).toFixed(0)} more`}
-                    </Text>
-                  )}
-                  {fixedExceedsSubtotal && minOrder <= 0 && (
-                    <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 8, color: '#FFCDD2', marginTop: 4 }}>
-                      {`Subtotal must be \u2265 \u20b1${Number(v.discount).toFixed(0)}`}
-                    </Text>
-                  )}
-                  <View style={styles.voucherPickerCodePill}>
-                    <Text style={styles.voucherPickerCodeText}>{v.code}</Text>
+
+                    {/* Sparkle details */}
+                    <Ionicons name="sparkles" size={10} color={isDisabled ? '#BDBDBD' : '#82C1F9'} style={styles.sparkleDecorationPopup} />
+
+                    {/* Center Content */}
+                    <View style={styles.centerTextContainerPopup}>
+                      <Text style={[styles.voucherMainTitlePopup, isDisabled && { color: '#9E9E9E' }]} numberOfLines={1}>
+                        {v.label.toUpperCase()}
+                      </Text>
+                      
+                      <View style={styles.dividerRowPopup}>
+                        <View style={styles.dividerLinePopup} />
+                        <Ionicons name="heart" size={8} color={isDisabled ? '#BDBDBD' : '#82C1F9'} style={{ marginHorizontal: 6 }} />
+                        <View style={styles.dividerLinePopup} />
+                      </View>
+                      
+                      <Text style={[styles.voucherSubtitlePopup, isDisabled && { color: '#9E9E9E' }]} numberOfLines={1}>
+                        {minOrder > 0 
+                          ? (meetsMinimum ? `MINIMUM ORDER ₱${minOrder}` : `NEED ₱${(minOrder - cartTotal).toFixed(0)} MORE TO UNLOCK`)
+                          : "VALID ON ALL FOAM COFFEE DRINKS"
+                        }
+                      </Text>
+                    </View>
+
+                    {/* Bottom Row Details */}
+                    <View style={styles.bottomDetailsRowPopup}>
+                      {/* Value Badge */}
+                      <View style={styles.valueRowPopup}>
+                        <View style={[styles.valueTagPopup, isDisabled && { backgroundColor: '#BDBDBD' }]}>
+                          <Text style={styles.valueTagTextPopup}>VALUE</Text>
+                        </View>
+                        <Text style={[styles.valueAmountTextPopup, isDisabled ? { color: '#9E9E9E' } : { color: '#82C1F9' }]}>
+                          {discountValue}
+                        </Text>
+                      </View>
+
+                      <View style={styles.bottomRowDividerPopup} />
+
+                      {/* Support message */}
+                      <View style={styles.supportContainerPopup}>
+                        <Ionicons name="cafe" size={12} color={isDisabled ? '#9E9E9E' : '#3D2B1F'} style={{ marginRight: 4 }} />
+                        <View>
+                          <Text style={[styles.supportTextPopup, isDisabled && { color: '#9E9E9E' }]}>THANK YOU</Text>
+                          <Text style={[styles.supportTextPopup, isDisabled && { color: '#9E9E9E' }]}>FOR CHOOSING FOAM COFFEE!</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Bottom Ribbon */}
+                    <View style={[styles.bottomRibbonPopup, isDisabled && { backgroundColor: '#E0E0E0' }]}>
+                      <Text style={[styles.bottomRibbonTextPopup, isDisabled && { color: '#9E9E9E' }]}>❤ MADE WITH PASSION ❤</Text>
+                    </View>
+                  </View>
+
+                  {/* Perforated divider */}
+                  <View style={styles.perforatedDividerPopup} />
+
+                  {/* RIGHT STUB (Tear-off Ticket - Sky Blue / Muted Gray) */}
+                  <View style={[styles.rightTicketStubPopup, { backgroundColor: isDisabled ? '#BDBDBD' : bgColor }]}>
+                    {/* Stub Header */}
+                    <View style={styles.stubHeaderPopup}>
+                      <Text style={styles.stubHeaderLabelPopup}>★ ENJOY ★</Text>
+                      <Text style={styles.stubHeaderSubtitlePopup}>Your Coffee!</Text>
+                    </View>
+
+                    {/* Circular Mascot Emblem with dashed border */}
+                    <View style={styles.stubMascotEmblemPopup}>
+                      <View style={styles.stubMascotCirclePopup}>
+                        <Image 
+                          source={require('../../../assets/app/logo.png')} 
+                          style={styles.stubMascotImgPopup} 
+                          resizeMode="contain" 
+                        />
+                      </View>
+                    </View>
+
+                    {/* Expiry Details */}
+                    <View style={styles.stubExpiryBlockPopup}>
+                      <Text style={styles.stubExpiryLabelPopup}>VALID UNTIL</Text>
+                      <Text style={styles.stubExpiryValuePopup}>12 / 31 / 2025</Text>
+                    </View>
+
+                    {/* Select Action Button (Pill shape bottom) */}
+                    <View style={styles.stubActionBlockPopup}>
+                      <Text style={styles.stubCodeLabelPopup}>ACTION</Text>
+                      {isDisabled ? (
+                        <View style={styles.stubCodePillPopupDisabled}>
+                          <Text style={styles.stubCodePillTextPopupDisabled}>LOCKED</Text>
+                        </View>
+                      ) : isSelected ? (
+                        <View style={styles.stubCodePillPopupSelected}>
+                          <Ionicons name="checkmark-circle" size={10} color="#FFF" style={{ marginRight: 2 }} />
+                          <Text style={[styles.stubCodePillTextPopup, { color: '#FFF' }]}>SELECTED</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.stubCodePillPopup}>
+                          <Text style={styles.stubCodePillTextPopup}>SELECT</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -806,7 +902,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -872,7 +968,7 @@ const styles = StyleSheet.create({
   walletCheckoutTeaser: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     borderRadius: 14,
     paddingVertical: 10,
     paddingHorizontal: 14,
@@ -1002,7 +1098,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1205,5 +1301,336 @@ const styles = StyleSheet.create({
     color: Colors.danger.default,
     marginTop: 6,
     marginLeft: 4,
+  },
+
+  // ─── Checkout Voucher Picker Ticket Styles ───────────────────────────────────
+  voucherPickerList: {
+    paddingBottom: 100,
+  },
+  ticketCardPopup: {
+    flexDirection: 'row',
+    width: '100%',
+    height: 170, // Matches welcome popup height
+    borderRadius: 12,
+    overflow: 'visible', // Avoid clipping punched scallops
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7',
+    position: 'relative',
+    shadowColor: '#2D78CD',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  topCenterCutoutPopup: {
+    position: 'absolute',
+    top: -7,
+    left: '67.5%',
+    marginLeft: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5', // Matches cart modal background color
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  bottomCenterCutoutPopup: {
+    position: 'absolute',
+    bottom: -7,
+    left: '67.5%',
+    marginLeft: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  leftEdgeCutoutPopup: {
+    position: 'absolute',
+    top: '50%',
+    left: -7,
+    marginTop: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  rightEdgeCutoutPopup: {
+    position: 'absolute',
+    top: '50%',
+    right: -7,
+    marginTop: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  leftTicketPopup: {
+    flex: 2.1,
+    backgroundColor: '#FDFBF7',
+    padding: 10,
+    justifyContent: 'space-between',
+    position: 'relative',
+    borderTopLeftRadius: 12, // Match parent corner radius
+    borderBottomLeftRadius: 12,
+  },
+  perforatedDividerPopup: {
+    width: 0.5,
+    height: '100%',
+    borderColor: 'rgba(61, 43, 31, 0.15)',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  rightTicketStubPopup: {
+    flex: 1,
+    backgroundColor: '#82C1F9',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopRightRadius: 12, // Match parent corner radius
+    borderBottomRightRadius: 12,
+  },
+  logoBlockPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoImgPopup: {
+    width: 18,
+    height: 18,
+  },
+  logoDividerPopup: {
+    width: 1,
+    height: 14,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 6,
+    opacity: 0.25,
+  },
+  logoTextContainerPopup: {
+    justifyContent: 'center',
+  },
+  logoTitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9.5,
+    color: '#3D2B1F',
+    lineHeight: 10,
+    letterSpacing: 0.2,
+  },
+  logoSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    lineHeight: 7,
+    marginTop: -1,
+  },
+  sparkleDecorationPopup: {
+    position: 'absolute',
+    top: 18,
+    right: 14,
+  },
+  centerTextContainerPopup: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 2,
+    paddingHorizontal: 6,
+  },
+  voucherMainTitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#3D2B1F',
+    letterSpacing: 1.5,
+  },
+  dividerRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
+    width: '80%',
+  },
+  dividerLinePopup: {
+    flex: 1,
+    height: 0.8,
+    backgroundColor: '#82C1F9',
+  },
+  voucherSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6,
+    color: '#3D2B1F',
+    letterSpacing: 0.8,
+  },
+  bottomDetailsRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 10,
+  },
+  valueRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  valueTagPopup: {
+    backgroundColor: '#82C1F9',
+    paddingVertical: 1.5,
+    paddingHorizontal: 4,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  valueTagTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+  },
+  valueAmountTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#82C1F9',
+    lineHeight: 14,
+  },
+  bottomRowDividerPopup: {
+    width: 0.8,
+    height: 14,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 8,
+    opacity: 0.2,
+  },
+  supportContainerPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  supportTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.2,
+    color: '#3D2B1F',
+    letterSpacing: 0.1,
+    lineHeight: 6,
+  },
+  bottomRibbonPopup: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 12,
+    backgroundColor: '#E6F3FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderBottomLeftRadius: 10,
+  },
+  bottomRibbonTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.2,
+    color: '#82C1F9',
+    letterSpacing: 1.2,
+  },
+  stubHeaderPopup: {
+    alignItems: 'center',
+  },
+  stubHeaderLabelPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  stubHeaderSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontStyle: 'italic',
+    fontSize: 8,
+    color: '#FFFFFF',
+  },
+  stubMascotEmblemPopup: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stubMascotCirclePopup: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderStyle: 'dashed',
+  },
+  stubMascotImgPopup: {
+    width: 24,
+    height: 24,
+  },
+  stubExpiryBlockPopup: {
+    alignItems: 'center',
+  },
+  stubExpiryLabelPopup: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+  stubExpiryValuePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    marginTop: -1,
+  },
+  stubActionBlockPopup: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  stubCodeLabelPopup: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+    marginBottom: 2,
+  },
+  stubCodePillPopup: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stubCodePillPopupSelected: {
+    backgroundColor: '#4CAF50', // Premium Green for Selected Vouchers!
+    borderRadius: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  stubCodePillPopupDisabled: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderRadius: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stubCodePillTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#82C1F9',
+    letterSpacing: 0.5,
+  },
+  stubCodePillTextPopupDisabled: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#FAF9F5',
+    letterSpacing: 0.5,
+    opacity: 0.8,
   },
 });

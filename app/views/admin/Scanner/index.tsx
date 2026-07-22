@@ -1,17 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import * as db from '../../../../lib/database';
-import Animated, { FadeIn, SlideInDown, SlideInUp } from 'react-native-reanimated';
+import Animated, { 
+  FadeIn, 
+  SlideInDown, 
+  SlideInUp, 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withRepeat, 
+  withTiming, 
+  Easing 
+} from 'react-native-reanimated';
 import { Colors } from '../../../../components/UI/Colors';
 import AdminGuard from '../../../../components/UI/AdminGuard';
 import api from '../../../../lib/axios';
@@ -23,7 +33,22 @@ export function ScannerPageContent() {
   const [torch, setTorch] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [lastResult, setLastResult] = useState<any>(null);
-  const scannedSetRef = useRef<Set<string>>(new Set()); // in-memory dedup for current session
+  const scannedSetRef = useRef<Set<string>>(new Set());
+
+  // Animated laser scan line
+  const laserAnim = useSharedValue(0);
+
+  useEffect(() => {
+    laserAnim.value = withRepeat(
+      withTiming(1, { duration: 2400, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true
+    );
+  }, []);
+
+  const animatedLaserStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: laserAnim.value * 235 }],
+  }));
 
   const handleBarCodeScanned = useCallback((result: BarcodeScanningResult) => {
     if (scanned || processing) return;
@@ -31,10 +56,6 @@ export function ScannerPageContent() {
     processQRData(result.data);
   }, [scanned, processing]);
 
-  /**
-   * Validate QR format matches what GeneratedOrderQR produces.
-   * Required fields: v, order_number, user_id, items (array with product_id, name, quantity, price), subtotal, total
-   */
   const validateQRFormat = (data: any): { valid: boolean; error?: string } => {
     if (!data || typeof data !== 'object') return { valid: false, error: 'Invalid QR data format.' };
     if (data.v !== 1) return { valid: false, error: `Unsupported QR version: ${data.v ?? 'none'}` };
@@ -56,13 +77,8 @@ export function ScannerPageContent() {
     return { valid: true };
   };
 
-  /**
-   * Check if order_number was already scanned (local SQLite dedup).
-   */
   const isAlreadyScannedLocally = async (orderNumber: string): Promise<boolean> => {
-    // Fast in-memory check first
     if (scannedSetRef.current.has(orderNumber)) return true;
-
     try {
       const database = await db.getDatabase();
       await database.runAsync(
@@ -78,9 +94,6 @@ export function ScannerPageContent() {
     }
   };
 
-  /**
-   * Persist scanned order_number to SQLite for cross-session dedup.
-   */
   const markAsScannedLocally = async (orderNumber: string) => {
     scannedSetRef.current.add(orderNumber);
     try {
@@ -92,14 +105,11 @@ export function ScannerPageContent() {
         `INSERT OR IGNORE INTO scanned_orders (order_number, scanned_at) VALUES (?, ?)`,
         [orderNumber, new Date().toISOString()]
       );
-    } catch (e) {
-      // Non-critical — server still enforces uniqueness
-    }
+    } catch (e) {}
   };
 
   const processQRData = async (data: string) => {
     setProcessing(true);
-
     try {
       let parsed: any;
       try {
@@ -108,14 +118,11 @@ export function ScannerPageContent() {
         parsed = { type: 'order_code', code: data };
       }
 
-      // Route based on QR type
       if (parsed.type === 'subscription_redeem') {
         await handleSubscriptionRedeem(parsed);
       } else if (parsed.v === 1 && parsed.order_number) {
-        // New order QR format (v1) — validate & auto-save
         await handleOrderQRScan(parsed);
       } else if (parsed.type === 'order_code' || parsed.order_number) {
-        // Legacy: plain order code verification
         await handleOrderVerify(parsed);
       } else {
         Alert.alert('Unknown QR', `Scanned: ${data.substring(0, 100)}`, [
@@ -131,22 +138,13 @@ export function ScannerPageContent() {
     }
   };
 
-  /**
-   * Handle new-format order QR (v:1).
-   * 1. Validate format
-   * 2. Check local duplicate
-   * 3. Send to server (server also checks duplicate)
-   * 4. Show result
-   */
   const handleOrderQRScan = async (data: any) => {
-    // Step 1: Validate QR format
     const validation = validateQRFormat(data);
     if (!validation.valid) {
       Alert.alert('Invalid QR Code', validation.error!, [{ text: 'OK', onPress: resetScanner }]);
       return;
     }
 
-    // Step 2: Check local duplicate
     const alreadyScanned = await isAlreadyScannedLocally(data.order_number);
     if (alreadyScanned) {
       Alert.alert(
@@ -157,7 +155,6 @@ export function ScannerPageContent() {
       return;
     }
 
-    // Step 3: Send to server for order creation (server also validates duplicate)
     try {
       const response = await api.post('/admin/scan/process-order-qr', {
         order_number: data.order_number,
@@ -178,7 +175,6 @@ export function ScannerPageContent() {
       });
 
       if (response.data.success) {
-        // Step 4: Mark locally as scanned & show success
         await markAsScannedLocally(data.order_number);
         setLastResult({
           type: 'order_created',
@@ -242,13 +238,12 @@ export function ScannerPageContent() {
     setLastResult(null);
   };
 
-  // ─── Permission Screen ───────────────────────────────────────────────────────
   if (!permission?.granted) {
     return (
       <View style={styles.container}>
         <Animated.View entering={FadeIn.duration(400)} style={styles.permissionContainer}>
           <View style={styles.permissionIconCircle}>
-            <Ionicons name="camera-outline" size={56} color={Colors.primary.default} />
+            <Ionicons name="camera-outline" size={56} color="#3B82F6" />
           </View>
           <Text style={styles.permissionTitle}>Camera Access Required</Text>
           <Text style={styles.permissionText}>
@@ -258,18 +253,14 @@ export function ScannerPageContent() {
             <Ionicons name="shield-checkmark" size={20} color="#FFF" style={{ marginRight: 8 }} />
             <Text style={styles.permissionBtnText}>Allow Camera</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.back()} style={styles.permissionBackBtn}>
-            <Text style={styles.permissionBackText}>Go Back</Text>
-          </TouchableOpacity>
         </Animated.View>
       </View>
     );
   }
 
-  // ─── Main Scanner View ───────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      {/* Camera */}
+      {/* Camera Background */}
       <CameraView
         style={styles.camera}
         facing="back"
@@ -278,44 +269,80 @@ export function ScannerPageContent() {
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       />
 
-      {/* Scan Frame Overlay */}
+      {/* Dark Navy Overlay Content */}
       <View style={styles.scanOverlay}>
-        {/* Top area */}
-        <View style={styles.overlaySection}>
-          <Animated.View entering={SlideInDown.duration(400)} style={styles.topBar}>
-            <TouchableOpacity>
-              
-            </TouchableOpacity>
+        {/* Top Section */}
+        <View style={styles.topSection}>
+          {/* Flash Button Top-Right */}
+          <TouchableOpacity 
+            onPress={() => setTorch(!torch)} 
+            style={styles.flashBtn}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.flashIconCircle, torch && styles.flashIconCircleActive]}>
+              <Ionicons name={torch ? 'flash' : 'flash-outline'} size={20} color={torch ? '#FFD700' : '#FFFFFF'} />
+            </View>
+            <Text style={styles.flashText}>Flash</Text>
+          </TouchableOpacity>
+
+          {/* Center Mascot & Header */}
+          <View style={styles.headerCenter}>
+            <View style={styles.mascotContainer}>
+              <Image 
+                source={require('../../../../assets/app/logo.png')} 
+                style={styles.mascotImg} 
+                resizeMode="contain" 
+              />
+              <Ionicons name="sparkles" size={14} color="#FFFFFF" style={styles.sparkleLeft} />
+              <Ionicons name="sparkles" size={10} color="#FFFFFF" style={styles.sparkleRight} />
+            </View>
+
             <Text style={styles.topTitle}>QR Scanner</Text>
-            <TouchableOpacity onPress={() => setTorch(!torch)} style={styles.iconBtn}>
-              <Ionicons name={torch ? 'flash' : 'flash-outline'} size={22} color={torch ? '#FFD700' : '#FFF'} />
-            </TouchableOpacity>
-          </Animated.View>
+            <Text style={styles.topSubtitle}>Scan a QR code to continue</Text>
+          </View>
         </View>
 
-        {/* Middle: scan frame */}
+        {/* Middle Viewfinder Frame Section (Dark Sides + Transparent Center) */}
         <View style={styles.middleRow}>
-          <View style={styles.overlayDarkSide} />
+          <View style={styles.sideMask} />
           <View style={styles.scanFrame}>
+            {/* Glowing Corner Brackets */}
             <View style={[styles.corner, styles.cTL]} />
             <View style={[styles.corner, styles.cTR]} />
             <View style={[styles.corner, styles.cBL]} />
             <View style={[styles.corner, styles.cBR]} />
+
+            {/* Animated Scanning Laser */}
+            {!processing && (
+              <Animated.View style={[styles.scanLaserLine, animatedLaserStyle]} />
+            )}
+
+            {/* Processing Spinner */}
             {processing && (
               <View style={styles.processingOverlay}>
-                <ActivityIndicator size="large" color={Colors.secondary.default} />
+                <ActivityIndicator size="large" color="#60A5FA" />
                 <Text style={styles.processingText}>Processing...</Text>
               </View>
             )}
           </View>
-          <View style={styles.overlayDarkSide} />
+          <View style={styles.sideMask} />
         </View>
 
-        {/* Bottom area */}
-        <View style={[styles.overlaySection, { justifyContent: 'flex-start', paddingTop: 30 }]}>
-          <Text style={styles.hintText}>
-            {scanned ? 'QR Code detected!' : 'Align QR code within the frame'}
-          </Text>
+        {/* Bottom Instruction Card Section */}
+        <View style={styles.bottomSection}>
+          <View style={styles.instructionCard}>
+            <View style={styles.instructionIconCircle}>
+              <Ionicons name="qr-code" size={20} color="#60A5FA" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.instructionTitle}>
+                {scanned ? 'QR Code detected!' : 'Align QR code within the frame'}
+              </Text>
+              <Text style={styles.instructionSubtitle}>
+                Make sure the code is clear and visible.
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -323,11 +350,11 @@ export function ScannerPageContent() {
       {lastResult && (
         <Animated.View entering={SlideInUp.duration(400)} style={styles.resultCard}>
           <View style={styles.resultIconRow}>
-            <View style={[styles.resultIcon, { backgroundColor: lastResult.type === 'subscription' ? '#dcfce7' : '#dbeafe' }]}>
+            <View style={[styles.resultIcon, { backgroundColor: lastResult.type === 'subscription' ? '#DCFCE7' : '#DBEAFE' }]}>
               <Ionicons
                 name={lastResult.type === 'subscription' ? 'cafe' : 'receipt'}
                 size={28}
-                color={lastResult.type === 'subscription' ? '#16a34a' : '#2563eb'}
+                color={lastResult.type === 'subscription' ? '#16A34A' : '#2563EB'}
               />
             </View>
           </View>
@@ -366,7 +393,7 @@ export function ScannerPageContent() {
               {lastResult.details.drinks_remaining !== undefined && (
                 <View style={styles.resultRow}>
                   <Text style={styles.resultLabel}>Remaining</Text>
-                  <Text style={[styles.resultValue, { color: '#16a34a' }]}>{lastResult.details.drinks_remaining} drinks</Text>
+                  <Text style={[styles.resultValue, { color: '#16A34A' }]}>{lastResult.details.drinks_remaining} drinks</Text>
                 </View>
               )}
               {lastResult.details.customer_name && (
@@ -402,131 +429,221 @@ export default function ScannerPage() {
   );
 }
 
-const FRAME_SIZE = 270;
+const FRAME_SIZE = 260;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#091426',
   },
   camera: {
     ...StyleSheet.absoluteFillObject,
   },
-
-  // ─── Overlay ─────────────────────────────────────────────────────────────────
   scanOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
+    backgroundColor: 'transparent',
   },
-  overlaySection: {
+  topSection: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(9, 20, 38, 0.88)',
+    paddingTop: 40,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 20,
+    position: 'relative',
+  },
+  flashBtn: {
+    position: 'absolute',
+    top: 40,
+    right: 24,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  flashIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#172A46',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#263F66',
+  },
+  flashIconCircleActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#60A5FA',
+  },
+  flashText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 10,
+    color: '#8A99AD',
+    marginTop: 4,
+  },
+  headerCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mascotContainer: {
+    width: 58,
+    height: 58,
+    position: 'relative',
+    marginBottom: 6,
+  },
+  mascotImg: {
+    width: '100%',
+    height: '100%',
+  },
+  sparkleLeft: {
+    position: 'absolute',
+    top: 0,
+    left: -4,
+  },
+  sparkleRight: {
+    position: 'absolute',
+    top: 12,
+    right: -6,
+  },
+  topTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 22,
+    color: '#FFFFFF',
+    lineHeight: 26,
+    textAlign: 'center',
+  },
+  topSubtitle: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    color: '#8A99AD',
+    marginTop: 2,
+    textAlign: 'center',
   },
   middleRow: {
+    width: '100%',
     flexDirection: 'row',
     height: FRAME_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  overlayDarkSide: {
+  sideMask: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    width: 0,
+    height: '100%',
+    backgroundColor: 'rgba(9, 20, 38, 0.88)',
   },
   scanFrame: {
     width: FRAME_SIZE,
     height: FRAME_SIZE,
+    backgroundColor: 'transparent',
+    position: 'relative',
   },
-
-  // ─── Corners ─────────────────────────────────────────────────────────────────
   corner: {
     position: 'absolute',
-    width: 32,
-    height: 32,
-    borderColor: Colors.secondary.default,
+    width: 36,
+    height: 36,
+    borderColor: '#3B82F6',
   },
-  cTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 12 },
-  cTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 12 },
-  cBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 12 },
-  cBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 12 },
-
-  // ─── Top Bar ─────────────────────────────────────────────────────────────────
-  topBar: {
+  cTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 18 },
+  cTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 18 },
+  cBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 18 },
+  cBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 18 },
+  scanLaserLine: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    top: 10,
+    height: 3,
+    backgroundColor: '#60A5FA',
+    borderRadius: 2,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  bottomSection: {
+    flex: 1,
+    backgroundColor: 'rgba(9, 20, 38, 0.88)',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 72,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+  instructionCard: {
+    width: '100%',
+    maxWidth: 340,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
+    backgroundColor: '#132238',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1E3A5F',
   },
-  iconBtn: {
+  instructionIconCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: '#1E3454',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topTitle: {
+  instructionTitle: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 18,
-    color: '#FFF',
-  },
-
-  // ─── Hint ────────────────────────────────────────────────────────────────────
-  hintText: {
-    fontFamily: 'Poppins-SemiBold',
     fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
+    color: '#FFFFFF',
   },
-
-  // ─── Processing ──────────────────────────────────────────────────────────────
+  instructionSubtitle: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
   processingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(9,20,38,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: 16,
   },
   processingText: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: 13,
-    color: '#FFF',
+    color: '#60A5FA',
     marginTop: 10,
   },
-
-  // ─── Permission ──────────────────────────────────────────────────────────────
   permissionContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 40,
-    backgroundColor: '#FAF9F5',
+    backgroundColor: '#091426',
   },
   permissionIconCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#F3F0E6',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    backgroundColor: '#132238',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#1E3A5F',
   },
   permissionTitle: {
     fontFamily: 'Poppins-Bold',
     fontSize: 22,
-    color: Colors.primary.default,
+    color: '#FFFFFF',
     textAlign: 'center',
   },
   permissionText: {
     fontFamily: 'Poppins',
-    fontSize: 14,
-    color: Colors.neutral.gray600,
+    fontSize: 13,
+    color: '#94A3B8',
     textAlign: 'center',
     marginTop: 10,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   permissionBtn: {
     flexDirection: 'row',
@@ -534,38 +651,27 @@ const styles = StyleSheet.create({
     marginTop: 28,
     paddingVertical: 16,
     paddingHorizontal: 32,
-    backgroundColor: Colors.secondary.default,
+    backgroundColor: '#2563EB',
     borderRadius: 16,
   },
   permissionBtnText: {
     fontFamily: 'Poppins-Bold',
     fontSize: 16,
-    color: '#FFF',
+    color: '#FFFFFF',
   },
-  permissionBackBtn: {
-    marginTop: 16,
-    paddingVertical: 10,
-  },
-  permissionBackText: {
-    fontFamily: 'Poppins',
-    fontSize: 14,
-    color: Colors.neutral.gray500,
-  },
-
-  // ─── Result Card ─────────────────────────────────────────────────────────────
   resultCard: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    padding: 28,
+    padding: 24,
     paddingBottom: 40,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 20,
     elevation: 12,
   },
@@ -583,21 +689,23 @@ const styles = StyleSheet.create({
   resultTitle: {
     fontFamily: 'Poppins-Bold',
     fontSize: 18,
-    color: Colors.primary.default,
+    color: '#1E293B',
     textAlign: 'center',
   },
   resultMessage: {
     fontFamily: 'Poppins',
     fontSize: 13,
-    color: Colors.neutral.gray600,
+    color: '#64748B',
     textAlign: 'center',
     marginTop: 4,
   },
   resultDetails: {
     marginTop: 16,
-    backgroundColor: '#F8F7F3',
+    backgroundColor: '#F8FAFC',
     borderRadius: 14,
     padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   resultRow: {
     flexDirection: 'row',
@@ -605,23 +713,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0EDE6',
+    borderBottomColor: '#F1F5F9',
   },
   resultLabel: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
-    color: Colors.neutral.gray500,
+    color: '#64748B',
   },
   resultValue: {
     fontFamily: 'Poppins-Bold',
     fontSize: 13,
-    color: Colors.primary.default,
+    color: '#1E293B',
   },
   scanAgainBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.secondary.default,
+    backgroundColor: '#2563EB',
     paddingVertical: 16,
     borderRadius: 16,
     marginTop: 20,
@@ -629,6 +737,6 @@ const styles = StyleSheet.create({
   scanAgainText: {
     fontFamily: 'Poppins-Bold',
     fontSize: 15,
-    color: '#FFF',
+    color: '#FFFFFF',
   },
 });

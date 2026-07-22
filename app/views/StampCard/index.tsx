@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -45,76 +47,73 @@ function AchievementCard({ ach, index, onClaimVoucher }: { ach: Achievement; ind
   return (
     <Animated.View
       entering={SlideInDown.delay(200 + index * 100).springify().damping(18).stiffness(120)}
-      style={[styles.achCard, { borderColor: ach.accentColor }]}
+      style={[styles.heroCard, { height: undefined, minHeight: 200, paddingBottom: 16 }]}
     >
-      {/* Card Header */}
-      <View style={[styles.achHeader, { backgroundColor: ach.color }]}>
-        <View style={styles.achHeaderLeft}>
-          <View style={[styles.achIconBg, { backgroundColor: ach.accentColor }]}>
-            <Ionicons name={ach.icon as any} size={20} color="#FAF9F5" />
+      {/* Top Section */}
+      <View style={styles.heroTopRow}>
+        <View style={styles.heroTopLeft}>
+          <View style={styles.brandLogoRow}>
+            <View style={[styles.achIconBg, { backgroundColor: ach.accentColor, width: 32, height: 32, borderRadius: 16 }]}>
+              <Ionicons name={ach.icon as any} size={16} color="#FAF9F5" />
+            </View>
+            <View style={styles.brandDivider} />
+            <View style={styles.brandTextContainer}>
+              <Text style={[styles.brandTitle, { color: ach.accentColor, fontSize: 13, lineHeight: 14 }]} numberOfLines={1}>{ach.label}</Text>
+              <Text style={[styles.brandSubtitle, { color: ach.color }]} numberOfLines={1}>{ach.category}</Text>
+            </View>
           </View>
-          <View style={{ marginLeft: 12 }}>
-            <Text style={styles.achCategory}>{ach.category}</Text>
-            <Text style={styles.achLabel}>{ach.label}</Text>
+          <View style={styles.brandHeartDividerRow}>
+            <View style={styles.brandHeartLine} />
+            <Ionicons name="heart" size={8} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+            <View style={styles.brandHeartLine} />
+          </View>
+          <Text style={[styles.brandQuote, { color: ach.accentColor }]} numberOfLines={2}>{ach.description.toUpperCase()}</Text>
+        </View>
+
+        {/* Right Top Header (Wavy Blue container) */}
+        <View style={[styles.heroTopRight, { backgroundColor: ach.color + '20' }]}>
+          <Text style={[styles.pointsCardLabel, { color: ach.accentColor }]}>PROGRESS</Text>
+          <View style={styles.pointsCardDividerRow}>
+            <View style={[styles.pointsCardLine, { backgroundColor: ach.accentColor }]} />
+          </View>
+          <View style={[styles.earnPanelCapsule, { backgroundColor: ach.accentColor, paddingVertical: 6 }]}>
+            <Text style={[styles.earnPanelText, { fontSize: 11, textAlign: 'center', lineHeight: 12 }]}>
+              {ach.collected} / {ach.required}
+            </Text>
           </View>
         </View>
-        {isComplete ? (
-          <View style={styles.completeBadge}>
-            <Ionicons name="checkmark-circle" size={14} color="#FFD700" style={{ marginRight: 4 }} />
-            <Text style={styles.completeBadgeText}>Complete!</Text>
-          </View>
-        ) : (
-          <Text style={styles.achCountText}>{ach.collected}/{ach.required}</Text>
-        )}
       </View>
 
-      {/* Stamp Grid */}
-      <View style={styles.achBody}>
-        <Text style={styles.achDesc}>{ach.description}</Text>
-
-        <View style={styles.stampGrid}>
+      {/* Middle Section (Stamps Area) */}
+      <View style={[styles.stampsContainer, { backgroundColor: ach.color + '15', marginHorizontal: 16, borderRadius: 16, paddingVertical: 16, flex: undefined }]}>
+        <View style={[styles.stampsGrid, { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, flex: undefined }]}>
           {Array.from({ length: ach.required }).map((_, i) => {
             const isStamped = i < ach.collected;
             return (
-              <View
-                key={i}
-                style={[
-                  styles.stampSlot,
-                  isStamped
-                    ? [styles.stampSlotActive, { backgroundColor: ach.accentColor, borderColor: ach.color }]
-                    : styles.stampSlotInactive,
-                ]}
-              >
-                {isStamped ? (
-                  <>
-                    <Ionicons name={ach.icon.replace('-outline', '') as any} size={18} color="#FAF9F5" />
-                    <View style={styles.stampCheck}>
-                      <Ionicons name="checkmark" size={8} color="#FAF9F5" />
-                    </View>
-                  </>
-                ) : (
-                  <Ionicons name={ach.icon as any} size={18} color={Colors.neutral.gray300} />
-                )}
+              <View key={i} style={[styles.stampCircleSlot, { borderColor: ach.color, width: 34, height: 34, borderRadius: 17 }]}>
+                <View style={[styles.stampCircleInner, isStamped && styles.stampCircleInnerActive]}>
+                  {isStamped ? (
+                    <Ionicons name={ach.icon.replace('-outline', '') as any} size={18} color={ach.accentColor} />
+                  ) : (
+                    <Text style={[styles.stampCircleNumber, { color: ach.color }]}>{i + 1}</Text>
+                  )}
+                </View>
               </View>
             );
           })}
         </View>
+      </View>
 
-        {/* Progress Bar */}
-        <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${progress * 100}%`, backgroundColor: ach.accentColor }]} />
-        </View>
-
-        {/* Reward Row */}
+      {/* Bottom Actions */}
+      <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
         <View style={styles.rewardRow}>
-          <Ionicons name="gift-outline" size={13} color={ach.accentColor} style={{ marginRight: 6 }} />
-          <Text style={[styles.rewardText, { color: ach.accentColor }]}>Reward: {ach.reward}</Text>
+          <Ionicons name="gift-outline" size={14} color={ach.accentColor} style={{ marginRight: 6 }} />
+          <Text style={[styles.rewardText, { color: ach.accentColor, fontSize: 11 }]}>Reward: {ach.reward}</Text>
         </View>
 
-        {/* Claim Voucher Button (when complete) */}
         {isComplete && (
           <TouchableOpacity
-            style={[styles.claimBtn, { backgroundColor: ach.accentColor }]}
+            style={[styles.claimBtn, { backgroundColor: ach.accentColor, marginTop: 10 }]}
             onPress={() => onClaimVoucher(ach)}
             activeOpacity={0.8}
           >
@@ -122,29 +121,6 @@ function AchievementCard({ ach, index, onClaimVoucher }: { ach: Achievement; ind
             <Text style={styles.claimBtnText}>Claim Voucher</Text>
           </TouchableOpacity>
         )}
-
-        {/* History Toggle */}
-        {ach.history.length > 0 && (
-          <TouchableOpacity style={styles.historyToggle} onPress={() => setExpanded(!expanded)}>
-            <Text style={[styles.historyToggleText, { color: ach.color }]}>
-              {expanded ? 'Hide History' : `View History (${ach.history.length})`}
-            </Text>
-            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={ach.color} />
-          </TouchableOpacity>
-        )}
-
-        {expanded && ach.history.map((item) => (
-          <View key={item.id} style={styles.historyItem}>
-            <View style={styles.historyLeft}>
-              <Ionicons name={ach.icon.replace('-outline', '') as any} size={16} color={ach.accentColor} style={{ marginRight: 8 }} />
-              <View>
-                <Text style={styles.historyName}>{item.product}</Text>
-                <Text style={styles.historyDate}>{item.date} • {item.time}</Text>
-              </View>
-            </View>
-            <Text style={[styles.historyStatus, { color: ach.accentColor }]}>Stamped</Text>
-          </View>
-        ))}
       </View>
     </Animated.View>
   );
@@ -278,13 +254,22 @@ function ClaimVoucherModal({
 }
 
 export default function StampCardView({ onBack }: { onBack?: () => void }) {
+  const router = useRouter();
   const { data: dummyData } = useAppData();
-  const achievements = dummyData.stamps.achievements;
+  const achievements = (dummyData.stamps.achievements || []).map((ach: Achievement) => {
+    return { 
+      ...ach, 
+      color: '#2D78CD', // Primary Brand Cloud Blue
+      accentColor: '#1D5FA7', // Deepened Primary Accent Blue
+    };
+  });
   const earnedVouchers = dummyData.stamps.vouchers;
   const availableVouchers = dummyData.vouchers;
 
   const totalCollected = achievements.reduce((s, a) => s + a.collected, 0);
   const totalRequired = achievements.reduce((s, a) => s + a.required, 0);
+  const currentCardStamps = totalCollected === 0 ? 0 : (totalCollected % 10 === 0 ? 10 : totalCollected % 10);
+  
   const [claimModalVisible, setClaimModalVisible] = useState(false);
   const [selectedAchievement, setSelectedAchievement] = useState<Achievement | null>(null);
 
@@ -302,22 +287,192 @@ export default function StampCardView({ onBack }: { onBack?: () => void }) {
     <View style={styles.container}>
       {/* Header with fade in */}
       <Animated.View entering={FadeIn.duration(400)} style={styles.headerRow}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => onBack ? onBack() : router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={28} color={Colors.primary.default} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Lesh Stamp Card</Text>
+        <Text style={styles.headerTitle}>Foam Stamp Card</Text>
         <View style={{ width: 32 }} />
       </Animated.View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Overall Summary - slide from bottom */}
-        <Animated.View entering={SlideInDown.delay(100).springify().damping(18).stiffness(120)} style={styles.summaryCard}>
-          <View style={styles.summaryLeft}>
-            <Text style={styles.summaryTitle}>Total Achievements</Text>
-            <Text style={styles.summaryCount}>{totalCollected} <Text style={styles.summaryOf}>/ {totalRequired} stamps</Text></Text>
-            <Text style={styles.summaryHint}>Collect across all categories to unlock rewards!</Text>
+        {/* HERO FOAM LOYALTY STAMP CARD */}
+        <Animated.View 
+          entering={SlideInDown.delay(100).springify().damping(18).stiffness(120)} 
+          style={styles.heroCard}
+        >
+          {/* Top Section */}
+          <View style={styles.heroTopRow}>
+            {/* Left Top Brand Block */}
+            <View style={styles.heroTopLeft}>
+              <View style={styles.brandLogoRow}>
+                <Image 
+                  source={require('../../../assets/app/logo.png')} 
+                  style={styles.brandMascotLogo} 
+                  resizeMode="contain" 
+                />
+                <View style={styles.brandDivider} />
+                <View style={styles.brandTextContainer}>
+                  <Text style={styles.brandTitle}>fōam</Text>
+                  <Text style={styles.brandSubtitle}>coffee</Text>
+                </View>
+              </View>
+              <View style={styles.brandHeartDividerRow}>
+                <View style={styles.brandHeartLine} />
+                <Ionicons name="heart" size={8} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+                <View style={styles.brandHeartLine} />
+              </View>
+              <Text style={styles.brandQuote}>GOOD COFFEE. GOOD MOOD.</Text>
+            </View>
+
+            {/* Right Top Header (Wavy Blue container) */}
+            <View style={styles.heroTopRight}>
+              <Text style={styles.pointsCardLabel}>LOYALTY</Text>
+              <Text style={styles.pointsCardSublabel}>POINTS CARD</Text>
+              <View style={styles.pointsCardDividerRow}>
+                <View style={styles.pointsCardLine} />
+                <Ionicons name="heart" size={6} color="#3D2B1F" style={{ marginHorizontal: 4 }} />
+                <View style={styles.pointsCardLine} />
+              </View>
+              {/* Earn Panel Capsule */}
+              <View style={styles.earnPanelCapsule}>
+                <View style={styles.earnPanelStarBg}>
+                  <Ionicons name="star" size={8} color="#82C1F9" />
+                </View>
+                <Text style={styles.earnPanelText}>
+                  EARN 1 POINT FOR EVERY PURCHASE OF ANY DRINK.
+                </Text>
+              </View>
+            </View>
           </View>
-          <Ionicons name="trophy" size={40} color="#FFD700" />
+
+          {/* Middle Section (Split Body) */}
+          <View style={styles.heroBodyRow}>
+            {/* Left Stamps Area (Sky blue base) */}
+            <View style={styles.stampsContainer}>
+              <View style={styles.stampsGrid}>
+                {/* Slots 1-5 */}
+                <View style={styles.stampsGridRow}>
+                  {[1, 2, 3, 4, 5].map((num) => {
+                    const isStamped = num <= currentCardStamps;
+                    return (
+                      <View key={num} style={styles.stampCircleSlot}>
+                        <View style={[styles.stampCircleInner, isStamped && styles.stampCircleInnerActive]}>
+                          {isStamped ? (
+                            <Image 
+                              source={require('../../../assets/app/logo.png')} 
+                              style={styles.stampMascotActive} 
+                              resizeMode="contain" 
+                            />
+                          ) : (
+                            <Text style={styles.stampCircleNumber}>{num}</Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+                {/* Slots 6-9 + 10 (Free Drink) */}
+                <View style={styles.stampsGridRow}>
+                  {[6, 7, 8, 9].map((num) => {
+                    const isStamped = num <= currentCardStamps;
+                    return (
+                      <View key={num} style={styles.stampCircleSlot}>
+                        <View style={[styles.stampCircleInner, isStamped && styles.stampCircleInnerActive]}>
+                          {isStamped ? (
+                            <Image 
+                              source={require('../../../assets/app/logo.png')} 
+                              style={styles.stampMascotActive} 
+                              resizeMode="contain" 
+                            />
+                          ) : (
+                            <Text style={styles.stampCircleNumber}>{num}</Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {/* Slot 10 (Free Drink) */}
+                  <TouchableOpacity
+                    style={styles.freeDrinkSlot}
+                    activeOpacity={currentCardStamps >= 10 ? 0.8 : 1}
+                    onPress={() => {
+                      if (currentCardStamps >= 10) {
+                        const mainCategoryAch = achievements[0];
+                        if (mainCategoryAch) handleClaimVoucher(mainCategoryAch);
+                      }
+                    }}
+                  >
+                    <View style={[styles.freeDrinkInner, currentCardStamps >= 10 && styles.freeDrinkInnerActive]}>
+                      {currentCardStamps >= 10 ? (
+                        <Image 
+                          source={require('../../../assets/app/logo.png')} 
+                          style={{ width: 28, height: 28 }} 
+                          resizeMode="contain" 
+                        />
+                      ) : (
+                        <>
+                          <Ionicons name="heart" size={10} color="#2D78CD" />
+                          <Text style={styles.freeDrinkTextTitle}>FREE</Text>
+                          <Text style={styles.freeDrinkTextSub}>DRINK!</Text>
+                        </>
+                      )}
+                    </View>
+                    <Text style={styles.freeDrinkCurvedText}>ON YOUR 10TH POINT</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* Right Instructions Area */}
+            <View style={styles.instructionsContainer}>
+              {/* Item 1 */}
+              <View style={styles.instructionItem}>
+                <View style={styles.instructionIconBg}>
+                  <Ionicons name="cafe-outline" size={12} color="#FFFFFF" />
+                </View>
+                <Text style={styles.instructionText}>COLLECT POINTS</Text>
+              </View>
+              <View style={styles.instructionLineDivider} />
+              
+              {/* Item 2 */}
+              <View style={styles.instructionItem}>
+                <View style={styles.instructionIconBg}>
+                  <Ionicons name="gift-outline" size={12} color="#FFFFFF" />
+                </View>
+                <Text style={styles.instructionText}>GET REWARDS & FREE DRINKS</Text>
+              </View>
+              <View style={styles.instructionLineDivider} />
+
+              {/* Item 3 */}
+              <View style={styles.instructionItem}>
+                <View style={styles.instructionIconBg}>
+                  <Ionicons name="star-outline" size={12} color="#FFFFFF" />
+                </View>
+                <Text style={styles.instructionText}>MORE POINTS. MORE TREATS!</Text>
+              </View>
+
+              {/* Thank you footer */}
+              <View style={styles.instructionFooter}>
+                <Text style={styles.thankYouLabel}>Thank you</Text>
+                <Text style={styles.thankYouSublabel}>FOR BEING AWESOME!</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Bottom Ribbon Bar */}
+          <View style={styles.heroRibbonRow}>
+            <View style={styles.ribbonLeft}>
+              <Ionicons name="heart" size={10} color="#FFFFFF" />
+              <Text style={styles.ribbonLeftText}>ONE CARD. MANY CUPS OF HAPPINESS.</Text>
+              <Ionicons name="heart" size={10} color="#FFFFFF" />
+            </View>
+            <View style={styles.ribbonRight}>
+              <Text style={styles.cardNoLabel}>CARD NO.</Text>
+              <View style={styles.cardNoPill}>
+                <Text style={styles.cardNoText}>FC-2024-00001</Text>
+              </View>
+            </View>
+          </View>
         </Animated.View>
 
         {/* Achievement Cards - staggered slide from bottom */}
@@ -337,19 +492,122 @@ export default function StampCardView({ onBack }: { onBack?: () => void }) {
             style={styles.voucherSection}
           >
             <Text style={styles.sectionTitle}>My Vouchers</Text>
-            {earnedVouchers.map((v) => (
-              <View key={v.id} style={styles.voucherItem}>
-                <View style={styles.historyLeft}>
-                  <Ionicons name="pricetag" size={20} color="#FFD700" style={{ marginRight: 10 }} />
-                  <View>
-                    <Text style={styles.historyName}>{v.description}</Text>
-                    <Text style={styles.historyDate}>Code: {v.code} • Expires {v.expiresAt}</Text>
+            {earnedVouchers.map((v, idx) => (
+              <Animated.View
+                key={`voucher-${v.id || v.code}-${idx}`}
+                entering={SlideInDown.delay(300 + idx * 100).duration(400)}
+              >
+                <View style={styles.ticketWrapper}>
+                  {/* Physical Ticket Edge Cutouts (Punched Holes) */}
+                  <View style={styles.topCenterCutout} />
+                  <View style={styles.bottomCenterCutout} />
+                  <View style={styles.leftEdgeCutout} />
+                  <View style={styles.rightEdgeCutout} />
+
+                  {/* LEFT TICKET (Main Body - Cream base) */}
+                  <View style={styles.leftTicket}>
+                    {/* Top Left Brand Logo */}
+                    <View style={styles.logoBlock}>
+                      <Image 
+                        source={require('../../../assets/app/logo.png')} 
+                        style={styles.logoImg} 
+                        resizeMode="contain" 
+                      />
+                      <View style={styles.logoDivider} />
+                      <View style={styles.logoTextContainer}>
+                        <Text style={styles.logoTitle}>fōam</Text>
+                        <Text style={styles.logoSubtitle}>coffee</Text>
+                      </View>
+                    </View>
+
+                    {/* Sparkle details */}
+                    <Ionicons name="sparkles" size={12} color="#82C1F9" style={styles.sparkleDecoration} />
+
+                    {/* Center Content */}
+                    <View style={styles.centerTextContainer}>
+                      <Text style={styles.voucherMainTitle} numberOfLines={1}>
+                        {v.description ? v.description.toUpperCase() : "VOUCHER"}
+                      </Text>
+                      
+                      <View style={styles.dividerRow}>
+                        <View style={styles.dividerLine} />
+                        <Ionicons name="heart" size={8} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+                        <View style={styles.dividerLine} />
+                      </View>
+                      
+                      <Text style={styles.voucherSubtitle} numberOfLines={1}>
+                        EXPIRES {v.expiresAt}
+                      </Text>
+                    </View>
+
+                    {/* Bottom Row Details */}
+                    <View style={styles.bottomDetailsRow}>
+                      <View style={styles.valueRow}>
+                        <View style={styles.valueTag}>
+                          <Text style={styles.valueTagText}>STATUS</Text>
+                        </View>
+                        <Text style={styles.valueAmountText}>{v.used ? "USED" : "ACTIVE"}</Text>
+                      </View>
+
+                      <View style={styles.bottomRowDivider} />
+
+                      {/* Support message */}
+                      <View style={styles.supportContainer}>
+                        <Ionicons name="cafe" size={14} color="#3D2B1F" style={{ marginRight: 6 }} />
+                        <View>
+                          <Text style={styles.supportText}>THANK YOU</Text>
+                          <Text style={styles.supportText}>FOR CHOOSING FOAM COFFEE!</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Bottom Ribbon */}
+                    <View style={styles.bottomRibbon}>
+                      <Text style={styles.bottomRibbonText}>❤ MADE WITH PASSION ❤</Text>
+                    </View>
+                  </View>
+
+                  {/* Perforated vertical line */}
+                  <View style={styles.perforatedDivider} />
+
+                  {/* RIGHT STUB (Tear-off Ticket - Sky Blue) */}
+                  <View style={[styles.rightTicketStub, v.used && { backgroundColor: Colors.neutral.gray400 }]}>
+                    {/* Stub Header */}
+                    <View style={styles.stubHeader}>
+                      <Text style={styles.stubHeaderLabel}>★ ENJOY ★</Text>
+                      <Text style={styles.stubHeaderSubtitle}>Your Coffee!</Text>
+                    </View>
+
+                    {/* Circular Mascot Emblem with dashed border */}
+                    <View style={styles.stubMascotEmblem}>
+                      <View style={styles.stubMascotCircle}>
+                        <Image 
+                          source={require('../../../assets/app/logo.png')} 
+                          style={styles.stubMascotImg} 
+                          resizeMode="contain" 
+                        />
+                      </View>
+                    </View>
+
+                    {/* Expiry Details */}
+                    <View style={styles.stubExpiryBlock}>
+                      <Text style={styles.stubExpiryLabel}>VALID UNTIL</Text>
+                      <Text style={styles.stubExpiryValue}>{v.expiresAt}</Text>
+                    </View>
+
+                    {/* Voucher Code Action button */}
+                    <View style={styles.stubActionBlock}>
+                      <Text style={styles.stubCodeLabel}>VOUCHER NO.</Text>
+                      <TouchableOpacity 
+                        style={styles.stubCodePill} 
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.stubCodePillText} numberOfLines={1}>{v.code}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
-                <Text style={[styles.historyStatus, { color: v.used ? Colors.neutral.gray400 : '#2E7D32' }]}>
-                  {v.used ? 'Used' : 'Active'}
-                </Text>
-              </View>
+              </Animated.View>
             ))}
           </Animated.View>
         )}
@@ -391,40 +649,321 @@ const styles = StyleSheet.create({
   },
   scrollContent: { paddingBottom: 40, paddingTop: 16 },
 
-  // Summary
-  summaryCard: {
+  // Hero Loyalty Card Styles
+  heroCard: {
+    width: '100%',
+    height: 275,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7',
+    overflow: 'hidden',
+    marginBottom: 20,
+    shadowColor: '#2D78CD',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  heroTopRow: {
+    height: 85,
+    flexDirection: 'row',
+    position: 'relative',
+  },
+  heroTopLeft: {
+    flex: 1.9,
+    paddingTop: 12,
+    paddingLeft: 16,
+    justifyContent: 'center',
+  },
+  brandLogoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  brandMascotLogo: {
+    width: 32,
+    height: 32,
+  },
+  brandDivider: {
+    width: 1.5,
+    height: 22,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 10,
+    opacity: 0.25,
+  },
+  brandTextContainer: {
+    justifyContent: 'center',
+  },
+  brandTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#3D2B1F',
+    lineHeight: 18,
+  },
+  brandSubtitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#3D2B1F',
+    lineHeight: 12,
+    marginTop: -2,
+  },
+  brandHeartDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '75%',
+    marginVertical: 4,
+  },
+  brandHeartLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#82C1F9',
+  },
+  brandQuote: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#82C1F9',
+    letterSpacing: 1.2,
+  },
+  heroTopRight: {
+    flex: 1.1,
+    backgroundColor: '#C5E3FF', // Sky blue curved top-right section
+    borderBottomLeftRadius: 36, // Cloud curved look
+    padding: 10,
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  pointsCardLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10.5,
+    color: '#3D2B1F',
+    textAlign: 'center',
+    lineHeight: 11,
+  },
+  pointsCardSublabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10.5,
+    color: '#3D2B1F',
+    textAlign: 'center',
+    lineHeight: 11,
+  },
+  pointsCardDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 2,
+  },
+  pointsCardLine: {
+    width: 25,
+    height: 0.8,
+    backgroundColor: '#3D2B1F',
+    opacity: 0.3,
+  },
+  earnPanelCapsule: {
+    backgroundColor: '#3D2B1F',
+    borderRadius: 8,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  earnPanelStarBg: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  earnPanelText: {
+    flex: 1,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.2,
+    color: '#FAF9F5',
+    lineHeight: 6.5,
+  },
+  heroBodyRow: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  stampsContainer: {
+    flex: 1.9,
+    backgroundColor: '#E6F3FF', // Lighter blue area
+    padding: 12,
+    justifyContent: 'center',
+  },
+  stampsGrid: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  stampsGridRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: Colors.primary.default,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
+    marginVertical: 4,
   },
-  summaryLeft: { flex: 1 },
-  summaryTitle: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 12,
-    color: '#FAF9F5',
-    opacity: 0.8,
+  stampCircleSlot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.2,
+    borderColor: '#82C1F9',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  summaryCount: {
+  stampCircleInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stampCircleInnerActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  stampMascotActive: {
+    width: 24,
+    height: 24,
+  },
+  stampCircleNumber: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 28,
-    color: '#FAF9F5',
-    marginVertical: 2,
+    fontSize: 12,
+    color: '#BDD9FB',
   },
-  summaryOf: {
-    fontFamily: 'Poppins',
-    fontSize: 16,
-    opacity: 0.7,
+  freeDrinkSlot: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    marginTop: -4,
   },
-  summaryHint: {
-    fontFamily: 'Poppins',
-    fontSize: 10,
-    color: '#FAF9F5',
-    opacity: 0.65,
+  freeDrinkInner: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#82C1F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  freeDrinkInnerActive: {
+    backgroundColor: '#E1EEFA',
+    borderColor: '#2D78CD',
+  },
+  freeDrinkTextTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7.5,
+    color: '#2D78CD',
+    lineHeight: 8.5,
+  },
+  freeDrinkTextSub: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7.5,
+    color: '#2D78CD',
+    lineHeight: 8.5,
+  },
+  freeDrinkCurvedText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 4.8,
+    color: '#82C1F9',
+    marginTop: 2,
+    textAlign: 'center',
+    letterSpacing: 0.1,
+  },
+  instructionsContainer: {
+    flex: 1.1,
+    backgroundColor: '#FDFBF7',
+    padding: 8,
+    justifyContent: 'space-between',
+    borderLeftWidth: 1,
+    borderLeftColor: '#E8E5DF',
+  },
+  instructionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  instructionIconBg: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#82C1F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  instructionText: {
+    flex: 1,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.5,
+    color: '#3D2B1F',
+    lineHeight: 7,
+  },
+  instructionLineDivider: {
+    height: 0.8,
+    backgroundColor: '#3D2B1F',
+    opacity: 0.1,
+    marginVertical: 1,
+  },
+  instructionFooter: {
+    alignItems: 'center',
     marginTop: 4,
+  },
+  thankYouLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontStyle: 'italic',
+    fontSize: 7.5,
+    color: '#3D2B1F',
+  },
+  thankYouSublabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5,
+    color: '#82C1F9',
+    letterSpacing: 0.5,
+  },
+  heroRibbonRow: {
+    height: 25,
+    backgroundColor: '#82C1F9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+  },
+  ribbonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ribbonLeftText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.8,
+  },
+  ribbonRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardNoLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6,
+    color: '#FFFFFF',
+    marginRight: 4,
+  },
+  cardNoPill: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+  },
+  cardNoText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    letterSpacing: 0.2,
   },
 
   // Achievement Card
@@ -749,5 +1288,321 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-SemiBold',
     fontSize: 13,
     color: Colors.neutral.gray500,
+  },
+  voucherSectionTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: Colors.primary.default,
+    marginBottom: 14,
+    marginTop: 6,
+  },
+  ticketWrapper: {
+    flexDirection: 'row',
+    width: '100%',
+    height: 190,
+    borderRadius: 16,
+    overflow: 'visible', // Visible overflow so punch holes aren't clipped!
+    marginBottom: 20,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7',
+    position: 'relative',
+    shadowColor: Colors.primary.default,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  // Punched circular hole styles to simulate physical ticket perforated scallops
+  topCenterCutout: {
+    position: 'absolute',
+    top: -8,
+    left: '67.5%',
+    marginLeft: -8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FAF9F5', // Match StampCard background color
+    zIndex: 10,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+  },
+  bottomCenterCutout: {
+    position: 'absolute',
+    bottom: -8,
+    left: '67.5%',
+    marginLeft: -8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+  },
+  leftEdgeCutout: {
+    position: 'absolute',
+    top: '50%',
+    left: -8,
+    marginTop: -8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+  },
+  rightEdgeCutout: {
+    position: 'absolute',
+    top: '50%',
+    right: -8,
+    marginTop: -8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FAF9F5',
+    zIndex: 10,
+    borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+  },
+  leftTicket: {
+    flex: 2.1,
+    backgroundColor: '#FDFBF7', // Cream base color
+    padding: 14,
+    justifyContent: 'space-between',
+    position: 'relative',
+    borderTopLeftRadius: 16, // Match parent corner radius
+    borderBottomLeftRadius: 16,
+  },
+  perforatedDivider: {
+    width: 0.5,
+    height: '100%',
+    borderColor: 'rgba(61, 43, 31, 0.2)',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  rightTicketStub: {
+    flex: 1,
+    backgroundColor: '#82C1F9', // Solid sky blue
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopRightRadius: 16, // Match parent corner radius
+    borderBottomRightRadius: 16,
+  },
+  logoBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoImg: {
+    width: 24,
+    height: 24,
+  },
+  logoDivider: {
+    width: 1.2,
+    height: 18,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 8,
+    opacity: 0.25,
+  },
+  logoTextContainer: {
+    justifyContent: 'center',
+  },
+  logoTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11.5,
+    color: '#3D2B1F',
+    lineHeight: 12,
+    letterSpacing: 0.2,
+  },
+  logoSubtitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#3D2B1F',
+    lineHeight: 9,
+    marginTop: -1,
+  },
+  sparkleDecoration: {
+    position: 'absolute',
+    top: 24,
+    right: 20,
+  },
+  centerTextContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+    paddingHorizontal: 12,
+  },
+  voucherMainTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 20,
+    color: '#3D2B1F', // Espresso brown text
+    letterSpacing: 2,
+    textAlign: 'center',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 3,
+    width: '80%',
+    justifyContent: 'center',
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#82C1F9',
+  },
+  voucherSubtitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#3D2B1F',
+    letterSpacing: 1.2,
+  },
+  bottomDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 4,
+  },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  valueTag: {
+    backgroundColor: '#82C1F9', // Sky blue tag
+    paddingVertical: 2,
+    paddingHorizontal: 5,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  valueTagText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  valueAmountText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#82C1F9',
+    lineHeight: 18,
+  },
+  bottomRowDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 10,
+    opacity: 0.2,
+  },
+  supportContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  supportText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6,
+    color: '#3D2B1F',
+    letterSpacing: 0.2,
+    lineHeight: 7,
+  },
+  bottomRibbon: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 14,
+    backgroundColor: '#E6F3FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderBottomLeftRadius: 14,
+  },
+  bottomRibbonText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6,
+    color: '#82C1F9',
+    letterSpacing: 1.5,
+  },
+  stubHeader: {
+    alignItems: 'center',
+  },
+  stubHeaderLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7.5,
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  stubHeaderSubtitle: {
+    fontFamily: 'Poppins-Bold',
+    fontStyle: 'italic',
+    fontSize: 9.5,
+    color: '#FFFFFF',
+  },
+  stubMascotEmblem: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stubMascotCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.2,
+    borderColor: '#FFFFFF',
+    borderStyle: 'dashed', // Dashed border around circular avatar
+  },
+  stubMascotImg: {
+    width: 32,
+    height: 32,
+  },
+  stubExpiryBlock: {
+    alignItems: 'center',
+  },
+  stubExpiryLabel: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+  stubExpiryValue: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    marginTop: -1,
+  },
+  stubActionBlock: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  stubCodeLabel: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+    marginBottom: 2,
+  },
+  stubCodePill: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  stubCodePillText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#82C1F9',
+    letterSpacing: 0.5,
   },
 });

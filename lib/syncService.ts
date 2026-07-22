@@ -198,7 +198,7 @@ function transformPromos(promos: any[]): any[] {
     heading: p.heading || p.title || '',
     subheading: p.subheading || p.subtitle || '',
     subtitle: p.subtitle || p.subheading || '',
-    color: p.color || '#B36534',
+    color: p.color || '#2D78CD',
     code: p.code || p.voucher?.code || '',
     badge: p.badge || p.label || '',
     image: p.image || '',

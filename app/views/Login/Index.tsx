@@ -85,7 +85,7 @@ export default function Login() {
             />
           </View>
           <Text style={styles.FontText}>Welcome back!</Text>
-          <Text style={styles.subtext}>Have a nice coffee date with Lesh Kaffe X Pasalubong</Text>
+          <Text style={styles.subtext}>Have a nice coffee date with Foam Coffee</Text>
         </Animated.View>
 
         {/* Form Fields — alternating left/right */}
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   },
   circle: {
     position: 'absolute',
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA', // Soft cloud blue to match brand theme
     borderRadius: 999,
   },
   circle1: {

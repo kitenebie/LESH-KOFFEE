@@ -202,8 +202,13 @@ export default function OrdersView() {
 
   const [selectedOrder, setSelectedOrder] = React.useState<Order | null>(null);
 
-  const activeOrders: Order[] = dummyData.orders.active as Order[];
-  const pastOrders: Order[] = dummyData.orders.past as Order[];
+  // Deduplicate by order id (merge logic can produce duplicates from local + server)
+  const dedup = (orders: Order[]) => {
+    const seen = new Set<string>();
+    return orders.filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
+  };
+  const activeOrders: Order[] = dedup(dummyData.orders.active as Order[]);
+  const pastOrders: Order[] = dedup(dummyData.orders.past as Order[]);
 
   const openStatus = (order: Order) => setSelectedOrder(order);
   const closeStatus = () => setSelectedOrder(null);
@@ -324,7 +329,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFDF8',
     borderRadius: 4,
     marginBottom: 16,
-    shadowColor: '#4A3525',
+    shadowColor: '#2D78CD',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.14,
     shadowRadius: 14,

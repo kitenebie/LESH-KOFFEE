@@ -32,12 +32,12 @@ export interface AppData {
 }
 
 // ─── Default empty data ─────────────────────────────────────────────────────
-const PLACEHOLDER_AVATAR = 'https://ui-avatars.com/api/?name=U&background=F3F0E6&color=4A3525&size=150';
+const PLACEHOLDER_AVATAR = 'https://api.dicebear.com/9.x/fun-emoji/png?seed=0';
 
 const EMPTY_DATA: AppData = {
   user: {
     id: '', name: 'Loading...', firstName: '', email: '', phone: '',
-    avatar: PLACEHOLDER_AVATAR, memberLevel: 'Bronze', memberLevelLabel: 'Lesh Kaffe Bronze Member',
+    avatar: PLACEHOLDER_AVATAR, memberLevel: 'Bronze', memberLevelLabel: 'Foam Coffee Bronze Member',
     walletBalance: 0, loyaltyPoints: 0, stampsCollected: 0, stampsRequired: 8,
     subscriptionBalance: 0, activeSubscription: null, joinedDate: '',
     tableNo: '', cashier: '', location: { latitude: 0, longitude: 0 }, addresses: [],
@@ -80,7 +80,7 @@ function transformApiData(raw: {
     phone: raw.user.phone || '',
     avatar: raw.user.avatar || '',
     memberLevel: raw.user.member_level || 'Bronze',
-    memberLevelLabel: raw.user.member_level_label || 'Lesh Kaffe Bronze Member',
+    memberLevelLabel: raw.user.member_level_label || 'Foam Coffee Bronze Member',
     walletBalance: 0, // Deprecated — real balance comes from dummyData.wallet.balance (LeshWallet model)
     loyaltyPoints: Number(raw.user.loyalty_points) || 0,
     stampsCollected: Number(raw.user.stamps_collected) || 0,
@@ -153,7 +153,7 @@ function transformApiData(raw: {
   const stampsData = raw.stamps || [];
   const achievements = (Array.isArray(stampsData) ? stampsData : []).map((s: any) => ({
     id: s.id?.toString() || '', category: s.category || '',
-    icon: s.icon || 'cafe-outline', color: s.color || '#4A3525', accentColor: s.accent_color || '#B36534',
+    icon: s.icon || 'cafe-outline', color: s.color || '#2D78CD', accentColor: s.accent_color || '#1B4D86',
     label: s.label || '', description: s.description || '',
     collected: Number(s.collected) || 0, required: Number(s.required) || 8, reward: s.reward || '',
     history: (s.histories || s.history || []).map((h: any) => ({
@@ -184,7 +184,7 @@ function transformApiData(raw: {
     id: p.id?.toString() || '', label: p.badge || p.label || '',
     title: p.heading || p.title || '', heading: p.heading || p.title || '',
     subheading: p.subheading || '', subtitle: p.subheading || '',
-    color: p.color || '#B36534', code: p.voucher?.code || p.code || '',
+    color: p.color || '#2D78CD', code: p.voucher?.code || p.code || '',
     badge: p.badge || '', image: p.image || '',
   }));
 
@@ -417,9 +417,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const apiData = await fetchFromAPI();
 
       if (apiData) {
-        // Always set data immediately from API (don't depend on SQLite roundtrip)
+        // Merge: preserve locally-added orders that aren't on the server yet
         console.log('[useAppData] Setting data — products:', apiData.products?.length, 'categories:', apiData.categories?.length, 'promos:', apiData.promos?.length);
-        setData(apiData);
+        setData(prev => {
+          const apiOrderIds = new Set([
+            ...(apiData.orders?.active || []).map((o: any) => o.id || o.order_number),
+            ...(apiData.orders?.past || []).map((o: any) => o.id || o.order_number),
+          ]);
+          const localOnlyOrders = (prev.orders?.active || []).filter(
+            (o: any) => !apiOrderIds.has(o.id) && !apiOrderIds.has(o.order_number)
+          );
+          return {
+            ...apiData,
+            orders: {
+              active: [...localOnlyOrders, ...(apiData.orders?.active || [])],
+              past: apiData.orders?.past || [],
+            },
+          };
+        });
 
         // Store in SQLite in background (for offline next time)
         try {
@@ -443,8 +458,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
       const apiData = await fetchFromAPI();
       if (apiData) {
-        // Always update display directly from API
-        setData(apiData);
+        // Merge: preserve locally-added orders that aren't on the server yet
+        setData(prev => {
+          // Find local orders not yet on the server (e.g., QR orders pending admin scan)
+          const apiOrderIds = new Set([
+            ...(apiData.orders?.active || []).map((o: any) => o.id || o.order_number),
+            ...(apiData.orders?.past || []).map((o: any) => o.id || o.order_number),
+          ]);
+          const localOnlyOrders = (prev.orders?.active || []).filter(
+            (o: any) => !apiOrderIds.has(o.id) && !apiOrderIds.has(o.order_number)
+          );
+          return {
+            ...apiData,
+            orders: {
+              active: [...localOnlyOrders, ...(apiData.orders?.active || [])],
+              past: apiData.orders?.past || [],
+            },
+          };
+        });
 
         // Store in SQLite for offline
         try {

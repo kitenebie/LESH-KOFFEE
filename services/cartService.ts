@@ -29,18 +29,33 @@ export interface CartMeta {
 export interface CartResponse {
   items: ServerCartItem[];
   meta: CartMeta;
+  computed: {
+    subtotal: number;
+    delivery_fee: number;
+    subscription_discount: number;
+    subscription_items_covered: number;
+    subscription_name: string | null;
+    voucher_discount: number;
+    applied_vouchers: any[];
+    perk_discount: number;
+    perks_applied: any[];
+    total_discount: number;
+    total: number;
+    item_count: number;
+  };
 }
 
 /**
  * Get user's cart from server.
  */
 export const getCart = async (): Promise<CartResponse> => {
+  const empty = { items: [], meta: { fulfillment_mode: 'DineIn' as const, applied_voucher_codes: [], use_subscription: false, subscription_items_to_use: 0 }, computed: { subtotal: 0, delivery_fee: 0, subscription_discount: 0, subscription_items_covered: 0, subscription_name: null, voucher_discount: 0, applied_vouchers: [], perk_discount: 0, perks_applied: [], total_discount: 0, total: 0, item_count: 0 } };
   try {
     const { data } = await api.get('/cart');
-    return data.data || { items: [], meta: { fulfillment_mode: 'DineIn', applied_voucher_codes: [], use_subscription: false, subscription_items_to_use: 0 } };
+    return data.data || empty;
   } catch (error) {
     console.warn('[cartService] Error fetching cart:', error);
-    return { items: [], meta: { fulfillment_mode: 'DineIn', applied_voucher_codes: [], use_subscription: false, subscription_items_to_use: 0 } };
+    return empty;
   }
 };
 

@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 56 : 36, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: Colors.neutral.gray200 },
   headerTitle: { fontFamily: 'Poppins-Bold', fontSize: 18, color: Colors.primary.default },
   headerSubtitle: { fontFamily: 'Poppins', fontSize: 11, color: Colors.neutral.gray500, marginTop: 2 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F3F0E6', justifyContent: 'center', alignItems: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1EEFA', justifyContent: 'center', alignItems: 'center' },
   remainingBadge: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, gap: 8, backgroundColor: Colors.primary.default + '10' },
   remainingText: { fontFamily: 'Poppins-SemiBold', fontSize: 13, color: Colors.primary.default },
 

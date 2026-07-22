@@ -1,8 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Animated,
   Easing,
+  Image,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import ReAnimated, {
   FadeIn,
   SlideInDown,
@@ -124,7 +127,7 @@ function StepNode({ step, status, isLast, index }: StepNodeProps) {
       const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.25,
+            toValue: 1.2,
             duration: 900,
             easing: Easing.inOut(Easing.ease),
             useNativeDriver: true,
@@ -142,28 +145,47 @@ function StepNode({ step, status, isLast, index }: StepNodeProps) {
     }
   }, [status, pulseAnim]);
 
-  const nodeColor =
-    status === 'done'
-      ? '#4CAF50'
-      : status === 'active'
-      ? Colors.secondary.default
-      : Colors.neutral.gray300;
+  const isDone = status === 'done';
+  const isActive = status === 'active';
+  const isPending = status === 'pending';
 
-  const lineColor = status === 'done' ? '#4CAF50' : Colors.neutral.gray200;
+  const badgeBg = isDone
+    ? '#22C55E'
+    : isActive
+    ? '#1D4ED8'
+    : '#EFF6FF';
+
+  const badgeIconColor = isDone || isActive ? '#FFFFFF' : '#94A3B8';
+  
+  const iconName = isDone
+    ? 'checkmark'
+    : step.key === 'queue'
+    ? 'hourglass-outline'
+    : step.key === 'preparing'
+    ? 'cafe'
+    : step.key === 'ready'
+    ? 'bag-handle-outline'
+    : step.key === 'delivery'
+    ? 'bicycle-outline'
+    : step.key === 'received'
+    ? 'location-outline'
+    : 'star-outline';
+
+  const timestamp = isDone ? '9:55 AM' : isActive ? '9:58 AM' : '';
 
   return (
     <ReAnimated.View
       entering={
         index % 2 === 0
-          ? SlideInLeft.delay(600 + index * 100).duration(400)
-          : SlideInRight.delay(600 + index * 100).duration(400)
+          ? SlideInLeft.delay(500 + index * 80).duration(350)
+          : SlideInRight.delay(500 + index * 80).duration(350)
       }
       style={styles.stepRow}
     >
       {/* Left: connector line + node */}
       <View style={styles.stepLeftCol}>
         {/* Pulse ring for active */}
-        {status === 'active' && (
+        {isActive && (
           <Animated.View
             style={[
               styles.pulseRing,
@@ -172,46 +194,53 @@ function StepNode({ step, status, isLast, index }: StepNodeProps) {
           />
         )}
 
-        {/* Node circle */}
+        {/* Node circle badge */}
         <View
           style={[
             styles.stepCircle,
-            { backgroundColor: nodeColor, borderColor: nodeColor },
+            { backgroundColor: badgeBg, borderColor: badgeBg },
           ]}
         >
-          {status === 'done' ? (
-            <Ionicons name="checkmark" size={14} color="#FFF" />
-          ) : (
-            <Ionicons
-              name={step.icon as any}
-              size={14}
-              color={status === 'active' ? '#FFF' : Colors.neutral.gray400}
-            />
-          )}
+          <Ionicons
+            name={iconName as any}
+            size={15}
+            color={badgeIconColor}
+          />
         </View>
 
-        {/* Connector line (not for last step) */}
+        {/* Connector line */}
         {!isLast && (
-          <View style={[styles.connectorLine, { backgroundColor: lineColor }]} />
+          <View style={[styles.connectorLine, isDone && { backgroundColor: '#86EFAC' }]} />
         )}
       </View>
 
-      {/* Right: label & description */}
-      <View style={styles.stepContent}>
-        <Text
-          style={[
-            styles.stepLabel,
-            status === 'done' && styles.stepLabelDone,
-            status === 'active' && styles.stepLabelActive,
-            status === 'pending' && styles.stepLabelPending,
-          ]}
-        >
-          {step.label}
-        </Text>
+      {/* Right: Step Card Container */}
+      <View
+        style={[
+          styles.stepCard,
+          isDone && styles.stepCardDone,
+          isActive && styles.stepCardActive,
+          isPending && styles.stepCardPending,
+        ]}
+      >
+        <View style={styles.stepCardHeader}>
+          <Text
+            style={[
+              styles.stepLabel,
+              isDone && styles.stepLabelDone,
+              isActive && styles.stepLabelActive,
+              isPending && styles.stepLabelPending,
+            ]}
+          >
+            {step.label}
+          </Text>
+          {timestamp ? <Text style={styles.stepTime}>{timestamp}</Text> : null}
+        </View>
+        
         <Text
           style={[
             styles.stepDesc,
-            status === 'pending' && styles.stepDescPending,
+            isPending && styles.stepDescPending,
           ]}
         >
           {step.description}
@@ -289,99 +318,307 @@ const UserPin = React.memo(() => (
 ));
 UserPin.displayName = 'UserPin';
 
-function DeliveryMap() {
-  const { data } = useAppData();
-  const deliveryTracking = data?.deliveryTracking || { riderName: '', riderPhone: '', riderAvatar: '', riderLocation: { latitude: 14.309855, longitude: 121.050009 }, userLocation: { latitude: 14.308983, longitude: 121.048883 }, estimatedMinutes: 0 };
-  const { riderLocation, userLocation, riderName, riderPhone, estimatedMinutes } = deliveryTracking;
+class MapErrorBoundary extends React.Component<{ children: React.ReactNode; fallback: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: any) {
+    console.warn('MapView failed to load:', error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
-  const riderCoords = { latitude: riderLocation.latitude, longitude: riderLocation.longitude };
-  const userCoords  = { latitude: userLocation.latitude,  longitude: userLocation.longitude  };
+function DeliveryMap({ orderId, orderItems, orderTotal }: { orderId: string; orderItems: string; orderTotal: number }) {
+  const { data } = useAppData();
+  const deliveryTracking = data?.deliveryTracking || { riderName: 'Rider Alex', riderPhone: '0912 345 6789', estimatedMinutes: 0 };
+  const { riderName } = deliveryTracking;
+
+  // Real user location state (default fallback Manila)
+  const [userLoc, setUserLoc] = useState<{ latitude: number; longitude: number }>({
+    latitude: 14.308983,
+    longitude: 121.048883,
+  });
+
+  // Dummy rider location ~500m radius away (0.0035 deg offset)
+  const [riderLoc, setRiderLoc] = useState<{ latitude: number; longitude: number }>({
+    latitude: 14.308983 + 0.0035,
+    longitude: 121.048883 + 0.0035,
+  });
 
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
+  const [etaMins, setEtaMins] = useState<number>(3);
 
   useEffect(() => {
-    fetchRoute(riderCoords, userCoords)
-      .then((coords) => {
+    (async () => {
+      let uLat = 14.308983;
+      let uLng = 121.048883;
+
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          if (loc?.coords) {
+            uLat = loc.coords.latitude;
+            uLng = loc.coords.longitude;
+          }
+        }
+      } catch (err) {
+        console.warn('Location permission error:', err);
+      }
+
+      const rLat = uLat + 0.0035;
+      const rLng = uLng + 0.0035;
+
+      const userC = { latitude: uLat, longitude: uLng };
+      const riderC = { latitude: rLat, longitude: rLng };
+
+      setUserLoc(userC);
+      setRiderLoc(riderC);
+
+      // Fetch real road route from OpenRouteService
+      try {
+        const coords = await fetchRoute(riderC, userC);
         if (coords && coords.length > 0) {
           setRouteCoords(coords);
         } else {
-          // Fallback to a styled road-aligned grid route
           setRouteCoords([
-            riderCoords,
-            { latitude: riderCoords.latitude, longitude: 121.0225 },
-            { latitude: 14.5560, longitude: 121.0225 },
-            { latitude: 14.5560, longitude: userCoords.longitude },
-            userCoords,
+            riderC,
+            { latitude: (rLat + uLat) / 2 + 0.0005, longitude: (rLng + uLng) / 2 - 0.0005 },
+            userC,
           ]);
         }
-      })
-      .catch(() => {
-        // Fallback to a styled road-aligned grid route
+      } catch (err) {
         setRouteCoords([
-          riderCoords,
-          { latitude: riderCoords.latitude, longitude: 121.0225 },
-          { latitude: 14.5560, longitude: 121.0225 },
-          { latitude: 14.5560, longitude: userCoords.longitude },
-          userCoords,
+          riderC,
+          { latitude: (rLat + uLat) / 2 + 0.0005, longitude: (rLng + uLng) / 2 - 0.0005 },
+          userC,
         ]);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      }
+    })();
   }, []);
 
-  const region = {
-    latitude:      (riderCoords.latitude  + userCoords.latitude)  / 2,
-    longitude:     (riderCoords.longitude + userCoords.longitude) / 2,
-    latitudeDelta:  0.012,
-    longitudeDelta: 0.012,
-  };
+  const polylineJson = routeCoords.length > 0
+    ? JSON.stringify(routeCoords.map(c => [c.latitude, c.longitude]))
+    : JSON.stringify([[riderLoc.latitude, riderLoc.longitude], [userLoc.latitude, userLoc.longitude]]);
+
+  const riderMarkerImg = Image.resolveAssetSource(require('../../../assets/app/rider-marker.png'))?.uri || '';
+  const userMarkerImg = Image.resolveAssetSource(require('../../../assets/app/user-marker.png'))?.uri || '';
+
+  const mapHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        body, html, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #F8FAFC; }
+        .leaflet-control-attribution { display: none !important; }
+        .speech-bubble {
+          position: absolute; top: -38px; left: 50%; transform: translateX(-50%);
+          background: #FFFFFF; color: #2563EB; font-family: -apple-system, Roboto, sans-serif; font-weight: bold;
+          font-size: 11px; padding: 4px 10px; border-radius: 12px; border: 1px solid #DBEAFE;
+          white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.08); z-index: 999;
+        }
+        .marker-img {
+          width: 44px; height: 44px; object-fit: contain;
+          filter: drop-shadow(0px 4px 6px rgba(37,99,235,0.3));
+        }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        var map = L.map('map', { zoomControl: false, dragging: true, touchZoom: true }).setView([${userLoc.latitude}, ${userLoc.longitude}], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          maxZoom: 19,
+          subdomains: 'abcd'
+        }).addTo(map);
+
+        var riderIcon = L.divIcon({ 
+          className: '', 
+          html: '<div class="speech-bubble">On the way!</div><img src="${riderMarkerImg}" class="marker-img" />', 
+          iconSize: [44, 44], 
+          iconAnchor: [22, 22] 
+        });
+
+        var userIcon = L.divIcon({ 
+          className: '', 
+          html: '<img src="${userMarkerImg}" class="marker-img" />', 
+          iconSize: [44, 44], 
+          iconAnchor: [22, 22] 
+        });
+
+        L.marker([${riderLoc.latitude}, ${riderLoc.longitude}], { icon: riderIcon }).addTo(map);
+        L.marker([${userLoc.latitude}, ${userLoc.longitude}], { icon: userIcon }).addTo(map);
+
+        var latlngs = ${polylineJson};
+        var polyline = L.polyline(latlngs, { color: '#2563EB', weight: 4, opacity: 0.9 }).addTo(map);
+        map.fitBounds(polyline.getBounds(), { padding: [35, 35] });
+      </script>
+    </body>
+    </html>
+  `;
+
+  const itemName = orderItems ? orderItems.replace(/^\d+x\s*/, '') : 'Classic Cappuccino';
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   return (
-    <View style={styles.mapCard}>
-      {/* Rider info bar */}
-      <View style={styles.riderBar}>
-        <View style={styles.riderInfo}>
-          <Ionicons name="bicycle" size={18} color={Colors.secondary.default} />
-          <View style={{ marginLeft: 8 }}>
-            <Text style={styles.riderName}>{riderName}</Text>
-            <Text style={styles.riderPhone}>{riderPhone}</Text>
+    <View style={styles.liveDeliveryCard}>
+      {/* Top Header: Live Delivery icon title & ETA pill */}
+      <View style={styles.liveDeliveryHeader}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.liveDeliveryIconBadge}>
+            <Ionicons name="bicycle" size={16} color="#2563EB" />
           </View>
+          <Text style={styles.liveDeliveryTitle}>Live Delivery</Text>
         </View>
-        <View style={styles.etaBadge}>
-          <Ionicons name="time-outline" size={13} color={Colors.secondary.default} />
-          <Text style={styles.etaBadgeText}>{estimatedMinutes} mins</Text>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={styles.liveDeliveryEtaPill}>
+            <Ionicons name="time-outline" size={14} color="#2563EB" style={{ marginRight: 4 }} />
+            <Text style={styles.liveDeliveryEtaText}>{etaMins} mins away</Text>
+          </View>
+
+          {/* Fullscreen Trigger Icon */}
+          <TouchableOpacity
+            style={styles.expandHeaderBtnCircle}
+            activeOpacity={0.8}
+            onPress={() => setIsFullscreen(true)}
+          >
+            <Ionicons name="expand" size={16} color="#2563EB" />
+          </TouchableOpacity>
         </View>
       </View>
 
-      <MapView
-        style={styles.map}
-        initialRegion={region}
-        mapType="standard"
+      {/* Middle Map Section */}
+      <View style={styles.liveDeliveryMapWrapper}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ html: mapHtml }}
+          style={styles.liveMapStyle}
+          scrollEnabled={false}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+        />
+
+        {/* Floating Expand Map Button */}
+        <TouchableOpacity
+          style={styles.floatingExpandMapBtn}
+          activeOpacity={0.85}
+          onPress={() => setIsFullscreen(true)}
+        >
+          <Ionicons name="scan-outline" size={18} color="#2563EB" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Bottom Info Bar: Order ID, Item, Total */}
+      <View style={styles.liveDeliveryFooterRow}>
+        <View style={styles.liveDeliveryCol}>
+          <Text style={styles.liveDeliveryMetaLabel}>Order ID</Text>
+          <Text style={styles.liveDeliveryMetaValBlue}>#{orderId}</Text>
+        </View>
+
+        <View style={styles.liveDeliveryDivider} />
+
+        <View style={styles.liveDeliveryCol}>
+          <Text style={styles.liveDeliveryMetaLabel}>1 Item</Text>
+          <Text style={styles.liveDeliveryMetaValDark} numberOfLines={1}>
+            {itemName}
+          </Text>
+        </View>
+
+        <View style={styles.liveDeliveryDivider} />
+
+        <View style={styles.liveDeliveryCol}>
+          <Text style={styles.liveDeliveryMetaLabel}>Total</Text>
+          <Text style={styles.liveDeliveryMetaValBlue}>₱{orderTotal.toFixed(2)}</Text>
+        </View>
+      </View>
+
+      {/* ── Animated Fullscreen Drawer Modal (Bottom to Top) ── */}
+      <Modal
+        visible={isFullscreen}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setIsFullscreen(false)}
       >
-        {routeCoords.length > 0 && (
-          <Polyline
-            coordinates={routeCoords}
-            strokeColor={Colors.secondary.default}
-            strokeWidth={4}
-          />
-        )}
-        <Marker coordinate={riderCoords} title={riderName} anchor={{ x: 0.5, y: 1 }} zIndex={3}>
-          <RiderPin />
-        </Marker>
-        <Marker coordinate={userCoords} title="You" anchor={{ x: 0.5, y: 1 }} zIndex={3}>
-          <UserPin />
-        </Marker>
-      </MapView>
+        <View style={styles.fullscreenDrawerContainer}>
+          {/* Header Bar */}
+          <View style={styles.fullscreenDrawerHeader}>
+            <TouchableOpacity
+              onPress={() => setIsFullscreen(false)}
+              style={styles.fullscreenCloseCircleBtn}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="chevron-down" size={22} color="#2563EB" />
+            </TouchableOpacity>
+
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.fullscreenDrawerTitle}>Live Tracking Map</Text>
+              <Text style={styles.fullscreenDrawerSub}>{riderName} • {etaMins} mins away</Text>
+            </View>
+
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Fullscreen Map View */}
+          <View style={styles.fullscreenMapFlex}>
+            <WebView
+              originWhitelist={['*']}
+              source={{ html: mapHtml }}
+              style={{ flex: 1 }}
+              scrollEnabled={true}
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+            />
+          </View>
+
+          {/* Floating Bottom Drawer Card */}
+          <View style={styles.fullscreenFloatingDrawerBar}>
+            <View style={styles.fullscreenFloatingDrawerInner}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <View style={styles.liveDeliveryIconBadge}>
+                  <Ionicons name="bicycle" size={18} color="#2563EB" />
+                </View>
+                <View style={{ marginLeft: 8, flex: 1 }}>
+                  <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 14, color: '#1E293B' }}>#{orderId}</Text>
+                  <Text style={{ fontFamily: 'Poppins-Medium', fontSize: 12, color: '#64748B' }} numberOfLines={1}>
+                    {itemName}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ alignItems: 'flex-end', marginLeft: 12 }}>
+                <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 16, color: '#2563EB' }}>
+                  ₱{orderTotal.toFixed(2)}
+                </Text>
+                <Text style={{ fontFamily: 'Poppins-Medium', fontSize: 11, color: '#16A34A' }}>
+                  On the way 🛵
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function OrderStatusView({
-  orderId = 'LK-90214',
+  orderId = 'LK-DEL-16165',
   currentStep = 'preparing',
-  fulfillmentMode = 'DineIn',
-  orderItems = '1x Gold Espresso Macchiato, 1x Classic Waffle',
-  orderTotal = 290.0,
+  fulfillmentMode = 'Delivery',
+  orderItems = '1x Classic Cappuccino',
+  orderTotal = 175.0,
   onBack,
 }: OrderStatusProps) {
   const { data: dummyData } = useAppData();
@@ -430,14 +667,24 @@ export default function OrderStatusView({
       {/* ── Header ── */}
       <ReAnimated.View entering={FadeIn.delay(200).duration(400)} style={styles.headerRow}>
         {onBack ? (
-          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={28} color={Colors.primary.default} />
+          <TouchableOpacity onPress={onBack} style={styles.backBtnCircle}>
+            <Ionicons name="chevron-back" size={22} color="#2563EB" />
           </TouchableOpacity>
         ) : (
           <View style={{ width: 44 }} />
         )}
         <Text style={styles.headerTitle}>Order Status</Text>
-        <View style={{ width: 44 }} />
+
+        {/* Mascot Emblem Top-Right */}
+        <View style={styles.headerMascotWrapper}>
+          <Image
+            source={require('../../../assets/app/logo.png')}
+            style={styles.headerMascotImg}
+            resizeMode="contain"
+          />
+          <Ionicons name="sparkles" size={10} color="#93C5FD" style={styles.headerSparkleLeft} />
+          <Ionicons name="sparkles" size={8} color="#93C5FD" style={styles.headerSparkleRight} />
+        </View>
       </ReAnimated.View>
 
       <ScrollView
@@ -447,62 +694,64 @@ export default function OrderStatusView({
         {/* ── Delivery Map (replaces order card when on delivery step) ── */}
         {currentStep === 'delivery' ? (
           <ReAnimated.View entering={SlideInLeft.delay(300).duration(400)}>
-            <DeliveryMap />
+            <DeliveryMap orderId={orderId} orderItems={orderItems} orderTotal={orderTotal} />
           </ReAnimated.View>
         ) : (
-        <ReAnimated.View entering={SlideInLeft.delay(300).duration(400)} style={styles.orderCard}>
-          <View style={styles.orderCardTop}>
-            <View>
-              <Text style={styles.orderIdLabel}>Order</Text>
-              <Text style={styles.orderId}>#{orderId}</Text>
+          <ReAnimated.View entering={SlideInLeft.delay(300).duration(400)} style={styles.orderCardHero}>
+            {/* Top Row: Order ID & Fulfillment Badge */}
+            <View style={styles.orderCardHeroTop}>
+              <View>
+                <Text style={styles.orderIdLabel}>ORDER ID</Text>
+                <Text style={styles.orderIdText}>#{orderId}</Text>
+              </View>
+
+              <View style={styles.fulfillmentBadgePill}>
+                <Ionicons
+                  name={fulfillmentMode === 'Delivery' ? 'bicycle' : 'restaurant'}
+                  size={14}
+                  color="#2563EB"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.fulfillmentBadgeText}>
+                  {fulfillmentMode === 'Delivery' ? 'Delivery' : 'Dine In'}
+                </Text>
+              </View>
             </View>
-            <View
-              style={[
-                styles.fulfillmentBadge,
-                fulfillmentMode === 'Delivery'
-                  ? styles.fulfillmentDelivery
-                  : styles.fulfillmentDineIn,
-              ]}
-            >
-              <Ionicons
-                name={
-                  fulfillmentMode === 'Delivery'
-                    ? 'bicycle-outline'
-                    : 'restaurant-outline'
-                }
-                size={12}
-                color={
-                  fulfillmentMode === 'Delivery' ? '#1565C0' : Colors.secondary.default
-                }
-                style={{ marginRight: 4 }}
+
+            {/* Middle Row: Item preview */}
+            <View style={styles.itemPreviewRow}>
+              <Image
+                source={require('../../../assets/app/latte-art.jpg')}
+                style={styles.itemPreviewImg}
+                resizeMode="cover"
               />
-              <Text
-                style={[
-                  styles.fulfillmentText,
-                  fulfillmentMode === 'Delivery'
-                    ? styles.fulfillmentTextDelivery
-                    : styles.fulfillmentTextDineIn,
-                ]}
-              >
-                {fulfillmentMode === 'Delivery' ? 'Delivery' : 'Dine In'}
+              <Text style={styles.itemPreviewText} numberOfLines={1}>
+                {orderItems || '1x Classic Cappuccino'}
               </Text>
             </View>
-          </View>
 
-          <Text style={styles.orderItemsText}>{orderItems}</Text>
+            {/* Bottom Row: Total & Delivery Rider graphic */}
+            <View style={styles.orderCardHeroBottom}>
+              <View>
+                <Text style={styles.orderTotalLabel}>TOTAL</Text>
+                <Text style={styles.orderTotalValue}>₱{orderTotal.toFixed(2)}</Text>
+              </View>
 
-          <View style={styles.orderCardDivider} />
-
-          <View style={styles.orderCardFooter}>
-            <Text style={styles.orderTotalLabel}>Total</Text>
-            <Text style={styles.orderTotalValue}>₱{orderTotal.toFixed(2)}</Text>
-          </View>
-        </ReAnimated.View>
+              <Image
+                source={require('../../../assets/app/rider.png')}
+                style={styles.riderGraphicImg}
+                resizeMode="contain"
+              />
+            </View>
+          </ReAnimated.View>
         )}
 
         {/* ── Timeline ── */}
         <ReAnimated.View entering={SlideInRight.delay(500).duration(400)} style={styles.timelineSection}>
-          <Text style={styles.timelineTitle}>Order Timeline</Text>
+          <View style={styles.timelineHeaderRow}>
+            <Text style={styles.timelineTitle}>Order Timeline</Text>
+            <View style={styles.timelineActiveBar} />
+          </View>
 
           <View style={styles.timelineBody}>
             {steps.map((step, index) => (
@@ -512,7 +761,7 @@ export default function OrderStatusView({
                 status={getStepStatus(step.key, currentStep, steps)}
                 isLast={index === steps.length - 1}
                 index={index}
-            />
+              />
             ))}
           </View>
         </ReAnimated.View>
@@ -528,7 +777,7 @@ export default function OrderStatusView({
               </>
             ) : (
               <>
-                <Ionicons name="sparkles" size={28} color={Colors.secondary.default} style={{ marginBottom: 8 }} />
+                <Ionicons name="sparkles" size={28} color="#2563EB" style={{ marginBottom: 8 }} />
                 <Text style={styles.rateTitle}>How was your experience?</Text>
                 <Text style={styles.rateSubtitle}>
                   Tap a star to rate your order. Your feedback helps us serve you better!
@@ -539,7 +788,7 @@ export default function OrderStatusView({
                 <TextInput
                   style={styles.commentInput}
                   placeholder="Leave a comment (optional)"
-                  placeholderTextColor={Colors.neutral.gray400}
+                  placeholderTextColor="#94A3B8"
                   value={comment}
                   onChangeText={setComment}
                   multiline
@@ -547,7 +796,7 @@ export default function OrderStatusView({
                 />
 
                 {ratingMessage !== '' && (
-                  <Text style={[styles.rateSubtitle, { color: '#E53935', marginBottom: 8 }]}>{ratingMessage}</Text>
+                  <Text style={[styles.rateSubtitle, { color: '#EF4444', marginBottom: 8 }]}>{ratingMessage}</Text>
                 )}
 
                 {rating > 0 && (
@@ -572,14 +821,24 @@ export default function OrderStatusView({
 
         {/* ── ETA notice ── */}
         {!isReceivedOrAfter && (
-          <ReAnimated.View entering={SlideInDown.delay(700).duration(400)} style={styles.etaCard}>
-            <Ionicons name="time-outline" size={18} color={Colors.primary.default} style={{ marginRight: 8 }} />
-            <Text style={styles.etaText}>
-              Estimated wait:{' '}
-              <Text style={styles.etaBold}>
+          <ReAnimated.View entering={SlideInDown.delay(700).duration(400)} style={styles.etaCardContainer}>
+            <Image
+              source={
+                fulfillmentMode === 'Delivery'
+                  ? require('../../../assets/app/coffewithclock.png')
+                  : require('../../../assets/app/foodwithclock.png')
+              }
+              style={styles.etaGraphicImgLeft}
+              resizeMode="contain"
+            />
+
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.etaLabelText}>Estimated wait time</Text>
+              <Text style={styles.etaTimeText}>
                 {fulfillmentMode === 'Delivery' ? '25–35 mins' : '5–10 mins'}
               </Text>
-            </Text>
+              <Text style={styles.etaSubtitleText}>We'll notify you once your order is on the way.</Text>
+            </View>
           </ReAnimated.View>
         )}
       </ScrollView>
@@ -591,33 +850,61 @@ export default function OrderStatusView({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F5',
+    backgroundColor: '#F8FAFC',
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 8 : 16,
+    paddingTop: Platform.OS === 'ios' ? 56 : 38,
     paddingBottom: 12,
-    backgroundColor: '#FAF9F5',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.neutral.gray200,
+    backgroundColor: '#F8FAFC',
   },
-  backBtn: {
+  backBtnCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   headerTitle: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 18,
-    color: Colors.primary.default,
+    fontSize: 22,
+    color: '#1E293B',
+  },
+  headerMascotWrapper: {
+    width: 44,
+    height: 44,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerMascotImg: {
+    width: 36,
+    height: 36,
+  },
+  headerSparkleLeft: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  headerSparkleRight: {
+    position: 'absolute',
+    top: 4,
+    right: -2,
   },
   scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
     paddingBottom: 48,
   },
 
@@ -627,8 +914,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 28,
     marginHorizontal: 0,
-    borderBottomWidth: 1.5,
-    borderBottomColor: Colors.secondary.default,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
   },
   riderBar: {
     flexDirection: 'row',
@@ -645,17 +933,17 @@ const styles = StyleSheet.create({
   riderName: {
     fontFamily: 'Poppins-Bold',
     fontSize: 13,
-    color: Colors.primary.default,
+    color: '#1E293B',
   },
   riderPhone: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 11,
-    color: Colors.neutral.gray500,
+    color: '#64748B',
   },
   etaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(179,101,52,0.1)',
+    backgroundColor: '#EFF6FF',
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 20,
@@ -664,7 +952,7 @@ const styles = StyleSheet.create({
   etaBadgeText: {
     fontFamily: 'Poppins-Bold',
     fontSize: 12,
-    color: Colors.secondary.default,
+    color: '#2563EB',
   },
   map: {
     flex: 1,
@@ -696,170 +984,226 @@ const styles = StyleSheet.create({
     borderRightColor: 'transparent',
   },
 
-  // ── Order Card ──
-  orderCard: {
+  // ── Hero Order Card ──
+  orderCardHero: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 20,
-    marginBottom: 28,
+    marginBottom: 24,
     borderWidth: 1.5,
-    borderColor: Colors.secondary.default,
-    shadowColor: Colors.secondary.default,
+    borderColor: '#BFDBFE',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+    position: 'relative',
+    overflow: 'hidden',
   },
-  orderCardTop: {
+  orderCardHeroTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   orderIdLabel: {
-    fontFamily: 'Poppins',
-    fontSize: 11,
-    color: Colors.neutral.gray500,
-  },
-  orderId: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 20,
-    color: Colors.primary.default,
+    fontSize: 11,
+    color: '#94A3B8',
     letterSpacing: 0.5,
   },
-  fulfillmentBadge: {
+  orderIdText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 22,
+    color: '#2563EB',
+    marginTop: 2,
+  },
+  fulfillmentBadgePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
   },
-  fulfillmentDineIn: {
-    backgroundColor: 'rgba(179,101,52,0.1)',
-  },
-  fulfillmentDelivery: {
-    backgroundColor: 'rgba(21,101,192,0.08)',
-  },
-  fulfillmentText: {
+  fulfillmentBadgeText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 11,
-  },
-  fulfillmentTextDineIn: {
-    color: Colors.secondary.default,
-  },
-  fulfillmentTextDelivery: {
-    color: '#1565C0',
-  },
-  orderItemsText: {
-    fontFamily: 'Poppins-SemiBold',
     fontSize: 13,
-    color: Colors.neutral.gray800,
-    lineHeight: 20,
-    marginBottom: 14,
+    color: '#2563EB',
   },
-  orderCardDivider: {
-    height: 1,
-    backgroundColor: Colors.neutral.gray100,
-    marginBottom: 14,
+  itemPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+    backgroundColor: '#F8FAFC',
+    padding: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
-  orderCardFooter: {
+  itemPreviewImg: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    marginRight: 10,
+  },
+  itemPreviewText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E293B',
+    flex: 1,
+  },
+  orderCardHeroBottom: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    marginTop: 12,
   },
   orderTotalLabel: {
-    fontFamily: 'Poppins',
-    fontSize: 12,
-    color: Colors.neutral.gray500,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#94A3B8',
+    letterSpacing: 0.5,
   },
   orderTotalValue: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 18,
-    color: Colors.secondary.default,
+    fontSize: 24,
+    color: '#2563EB',
+    marginTop: 2,
+  },
+  riderGraphicImg: {
+    width: 110,
+    height: 80,
+    marginBottom: -10,
+    marginRight: -6,
   },
 
   // ── Timeline ──
   timelineSection: {
-    marginBottom: 28,
+    marginBottom: 24,
+  },
+  timelineHeaderRow: {
+    marginBottom: 16,
+    position: 'relative',
   },
   timelineTitle: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-    color: Colors.primary.default,
-    marginBottom: 20,
+    fontSize: 17,
+    color: '#1E293B',
+  },
+  timelineActiveBar: {
+    width: 24,
+    height: 3,
+    backgroundColor: '#2563EB',
+    borderRadius: 1.5,
+    marginTop: 4,
   },
   timelineBody: {
-    paddingLeft: 4,
+    paddingLeft: 0,
   },
   stepRow: {
     flexDirection: 'row',
-    minHeight: 64,
-    marginBottom: 0,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
   stepLeftCol: {
-    width: 40,
+    width: 44,
     alignItems: 'center',
+    paddingTop: 12,
   },
   pulseRing: {
     position: 'absolute',
-    top: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(179,101,52,0.15)',
+    top: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(37, 99, 235, 0.15)',
     zIndex: 0,
   },
   stepCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
   },
   connectorLine: {
-    flex: 1,
     width: 2,
-    borderRadius: 1,
-    marginVertical: 4,
-    minHeight: 30,
-  },
-  stepContent: {
     flex: 1,
-    paddingLeft: 14,
-    paddingBottom: 20,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 4,
+    minHeight: 24,
+    borderStyle: 'dashed',
+  },
+  stepCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    marginLeft: 8,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  stepCardDone: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#DCFCE7',
+  },
+  stepCardActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    shadowOpacity: 0.05,
+    elevation: 2,
+  },
+  stepCardPending: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#F8FAFC',
+    opacity: 0.65,
+  },
+  stepCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   stepLabel: {
     fontFamily: 'Poppins-Bold',
     fontSize: 14,
-    marginBottom: 2,
+    color: '#1E293B',
   },
   stepLabelDone: {
-    color: '#4CAF50',
+    color: '#16A34A',
   },
   stepLabelActive: {
-    color: Colors.secondary.default,
+    color: '#1E293B',
   },
   stepLabelPending: {
-    color: Colors.neutral.gray400,
+    color: '#64748B',
+  },
+  stepTime: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    color: '#94A3B8',
   },
   stepDesc: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
-    color: Colors.neutral.gray600,
+    color: '#64748B',
     lineHeight: 18,
   },
   stepDescPending: {
-    color: Colors.neutral.gray300,
+    color: '#94A3B8',
   },
 
-  // ── Rate Card ──
+  // ── Rate Section ──
   rateCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -867,7 +1211,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.neutral.gray200,
+    borderColor: '#E2E8F0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -877,14 +1221,14 @@ const styles = StyleSheet.create({
   rateTitle: {
     fontFamily: 'Poppins-Bold',
     fontSize: 16,
-    color: Colors.primary.default,
+    color: '#1E293B',
     marginBottom: 6,
     textAlign: 'center',
   },
   rateSubtitle: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
-    color: Colors.neutral.gray500,
+    color: '#64748B',
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: 16,
@@ -900,12 +1244,12 @@ const styles = StyleSheet.create({
   commentInput: {
     width: '100%',
     borderWidth: 1,
-    borderColor: Colors.neutral.gray200,
+    borderColor: '#E2E8F0',
     borderRadius: 12,
     padding: 12,
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 13,
-    color: Colors.primary.default,
+    color: '#1E293B',
     minHeight: 60,
     textAlignVertical: 'top',
     marginBottom: 16,
@@ -913,11 +1257,11 @@ const styles = StyleSheet.create({
   submitRateBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.secondary.default,
+    backgroundColor: '#2563EB',
     paddingVertical: 12,
     paddingHorizontal: 28,
     borderRadius: 24,
-    shadowColor: Colors.secondary.default,
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -929,24 +1273,235 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
 
-  // ── ETA Card ──
-  etaCard: {
+  // ── Live Delivery Card Styles ──
+  liveDeliveryCard: {
+    marginHorizontal: -20,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 24,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 2,
+    overflow: 'hidden',
+  },
+  liveDeliveryHeader: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF8F3',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(179,101,52,0.15)',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
-  etaText: {
-    fontFamily: 'Poppins',
-    fontSize: 13,
-    color: Colors.neutral.gray700,
+  liveDeliveryIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  liveDeliveryTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#2563EB',
+  },
+  liveDeliveryEtaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  liveDeliveryEtaText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
+    color: '#2563EB',
+  },
+  expandHeaderBtnCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingExpandMapBtn: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  liveDeliveryMapWrapper: {
+    height: 200,
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+  },
+  liveMapStyle: {
+    width: '100%',
+    height: '100%',
     flex: 1,
   },
-  etaBold: {
+
+  // ── Fullscreen Drawer Modal ──
+  fullscreenDrawerContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  fullscreenDrawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 54 : 16,
+    paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
+  },
+  fullscreenCloseCircleBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullscreenDrawerTitle: {
     fontFamily: 'Poppins-Bold',
-    color: Colors.secondary.default,
+    fontSize: 16,
+    color: '#1E293B',
+  },
+  fullscreenDrawerSub: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 12,
+    color: '#2563EB',
+  },
+  fullscreenMapFlex: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  fullscreenFloatingDrawerBar: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 34 : 20,
+    left: 16,
+    right: 16,
+    zIndex: 20,
+  },
+  fullscreenFloatingDrawerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  liveDeliveryFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  liveDeliveryCol: {
+    flex: 1,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  liveDeliveryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E2E8F0',
+    marginHorizontal: 10,
+  },
+  liveDeliveryMetaLabel: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    color: '#94A3B8',
+    marginBottom: 2,
+  },
+  liveDeliveryMetaValBlue: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#2563EB',
+  },
+  liveDeliveryMetaValDark: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E293B',
+  },
+
+  // ── ETA Card ──
+  etaCardContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+  etaGraphicImgLeft: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
+  },
+  etaLabelText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 12,
+    color: '#64748B',
+  },
+  etaTimeText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 18,
+    color: '#2563EB',
+    marginVertical: 2,
+  },
+  etaSubtitleText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 11,
+    color: '#94A3B8',
   },
 });

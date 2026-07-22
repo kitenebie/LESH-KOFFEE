@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,7 +9,6 @@ import {
   View
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { Button } from '../../../components/UI/Button';
 import { Colors } from '../../../components/UI/Colors';
 
 interface GeneratedOrderQRProps {
@@ -85,7 +85,7 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
 
   // QR payload — matches Order model fields in LeshServer exactly
   const qrPayload = JSON.stringify({
-    v: QR_VERSION, // version for future-proofing format validation
+    v: QR_VERSION,
     order_number: normalizedOrder.order_number,
     user_id: normalizedOrder.user_id,
     fulfillment: normalizedOrder.fulfillment,
@@ -109,58 +109,89 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <Ionicons name="close" size={24} color={Colors.primary.default} />
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} activeOpacity={0.8}>
+          <Ionicons name="close" size={20} color="#1D5FA7" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Order Ticket QR</Text>
-        <View style={{ width: 44 }} />
+        <View style={{ width: 36 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
         {/* Ticket Container */}
-        <View style={styles.ticketCard}>
-          {/* Top Notch Cutout design */}
-          <View style={styles.notchLeft} />
-          <View style={styles.notchRight} />
-
-          {/* Ticket Header */}
-          <View style={styles.ticketHeader}>
-            <Ionicons name="cafe" size={28} color={Colors.secondary.default} />
-            <Text style={styles.storeName}>Lesh Kaffe × Pasalubong</Text>
-            <Text style={styles.tagline}>A Taste of Home & Heritage</Text>
-          </View>
-
-          {/* Table Badge */}
-          {normalizedOrder.ref_no && <View style={styles.tableBadge}>
-            <Text style={styles.tableBadgeText}>TABLE NO. {normalizedOrder.ref_no}</Text>
-          </View>
-          }
-
-          {/* QR Code Graphic Section */}
-          <View style={styles.qrSection}>
-            {/* Styled QR frame */}
-            <View style={styles.qrBorder}>
-              <QRCode
-                value={qrPayload}
-                size={140}
-                color={Colors.primary.default}
-                backgroundColor="#FAF9F5"
+        <View style={styles.ticketContainer}>
+          {/* Main Top Section */}
+          <View style={styles.ticketTopBody}>
+            {/* Soft Wavy Header Decor */}
+            <View style={styles.cloudWaveBg} pointerEvents="none" />
+            
+            {/* Top Mascot Emblem */}
+            <View style={styles.mascotCircle}>
+              <Image 
+                source={require('../../../assets/app/logo.png')} 
+                style={styles.mascotImg} 
+                resizeMode="contain" 
               />
             </View>
-            <Text style={styles.ticketId}>{normalizedOrder.order_number}</Text>
-            
+
+            {/* Brand Title & Subtitle */}
+            <Text style={styles.storeName}>Foam Coffee</Text>
+            <Text style={styles.tagline}>Elevating Coffee Excellence</Text>
+
+            <View style={styles.brandDividerRow}>
+              <View style={styles.brandLine} />
+              <Ionicons name="heart" size={10} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+              <View style={styles.brandLine} />
+            </View>
+
+            {/* Table Badge */}
+            <View style={styles.tableBadge}>
+              <Text style={styles.tableBadgeText}>
+                {normalizedOrder.ref_no ? `TABLE NO. ${normalizedOrder.ref_no}` : (normalizedOrder.fulfillment === 'Delivery' ? 'DELIVERY ORDER' : 'DINE-IN ORDER')}
+              </Text>
+            </View>
+
+            {/* QR Code Graphic Frame */}
+            <View style={styles.qrFrame}>
+              <QRCode
+                value={qrPayload}
+                size={175}
+                color="#1D5FA7"
+                backgroundColor="#FFFFFF"
+              />
+            </View>
+
+            {/* Ticket Code Pill */}
+            <View style={styles.ticketIdPill}>
+              <View style={styles.ticketIdIconCircle}>
+                <Ionicons name="receipt" size={12} color="#FFFFFF" />
+              </View>
+              <Text style={styles.ticketIdText}>{normalizedOrder.order_number}</Text>
+            </View>
+
+            {/* Timer */}
             <View style={styles.timerContainer}>
-              <Ionicons name="time-outline" size={14} color={Colors.danger.default} />
+              <Ionicons name="time-outline" size={14} color="#E11D48" />
               <Text style={styles.timerText}>QR expires in: <Text style={styles.boldTimer}>{formatTime(timeLeft)}</Text></Text>
             </View>
           </View>
 
-          {/* Line Separator */}
-          <View style={styles.dashedSeparator} />
+          {/* Perforated Cutout Separator */}
+          <View style={styles.perforationWrapper}>
+            <View style={styles.notchLeft} />
+            <View style={styles.dashedSeparator} />
+            <View style={styles.notchRight} />
+          </View>
 
-          {/* Order Summary list inside Ticket */}
+          {/* Order Summary Stub (Bottom Section) */}
           <View style={styles.summarySection}>
-            <Text style={styles.sectionTitle}>Order Summary</Text>
+            <View style={styles.summaryTitleRow}>
+              <View style={styles.summaryTitleIconBox}>
+                <Ionicons name="clipboard" size={14} color="#1D5FA7" />
+              </View>
+              <Text style={styles.sectionTitle}>Order Summary</Text>
+            </View>
+
+            {/* Items */}
             {normalizedOrder.items.map((item, idx) => (
               <View key={idx} style={styles.itemRow}>
                 <Text style={styles.itemQty}>{item.quantity}x</Text>
@@ -169,8 +200,11 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
               </View>
             ))}
 
+            <View style={styles.summaryDottedDivider} />
+
+            {/* Breakdown */}
             {normalizedOrder.subtotal > 0 && (
-              <View style={[styles.summaryMetaRow, { marginTop: 12, borderTopWidth: 1, borderTopColor: Colors.neutral.gray200, paddingTop: 8 }]}>
+              <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Subtotal</Text>
                 <Text style={styles.summaryMetaVal}>₱{normalizedOrder.subtotal.toFixed(2)}</Text>
               </View>
@@ -186,59 +220,49 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
             {normalizedOrder.subscriptionDiscount !== undefined && normalizedOrder.subscriptionDiscount > 0 && (
               <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Subscription Discount</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.subscriptionDiscount.toFixed(2)}</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#16A34A', fontFamily: 'Poppins-Bold' }]}>-₱{normalizedOrder.subscriptionDiscount.toFixed(2)}</Text>
               </View>
             )}
 
             {normalizedOrder.voucherCode && normalizedOrder.voucherDiscount !== undefined && normalizedOrder.voucherDiscount > 0 && (
               <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Voucher ({normalizedOrder.voucherCode})</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.voucherDiscount.toFixed(2)}</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#16A34A', fontFamily: 'Poppins-Bold' }]}>-₱{normalizedOrder.voucherDiscount.toFixed(2)}</Text>
               </View>
             )}
 
             {(normalizedOrder as any).perkDiscount > 0 && (
               <View style={styles.summaryMetaRow}>
                 <Text style={styles.summaryMetaLabel}>Subscriber Perk</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{(normalizedOrder as any).perkDiscount.toFixed(2)}</Text>
+                <Text style={[styles.summaryMetaVal, { color: '#16A34A', fontFamily: 'Poppins-Bold' }]}>-₱{(normalizedOrder as any).perkDiscount.toFixed(2)}</Text>
               </View>
             )}
 
-            {/* Show discount line — when discount exists */}
-            {normalizedOrder.discount > 0 &&
-              !(normalizedOrder.subscriptionDiscount > 0) && !(normalizedOrder.voucherDiscount > 0) && (
-              <View style={styles.summaryMetaRow}>
-                <Text style={styles.summaryMetaLabel}>Discount</Text>
-                <Text style={[styles.summaryMetaVal, { color: '#4CAF50' }]}>-₱{normalizedOrder.discount.toFixed(2)}</Text>
-              </View>
-            )}
-
-            <View style={[styles.totalRow, normalizedOrder.subtotal === undefined && { borderTopWidth: 1 }]}>
+            {/* Grand Total */}
+            <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Grand Total</Text>
-              <Text style={[styles.totalVal, normalizedOrder.total === 0 && { color: '#4CAF50' }]}>
-                {normalizedOrder.total === 0 && normalizedOrder.payment_method === 'subscription'
-                  ? 'FREE ☕'
+              <Text style={styles.totalVal}>
+                {normalizedOrder.total === 0 && (normalizedOrder.payment_method === 'subscription' || (normalizedOrder.subscriptionDiscount ?? 0) > 0)
+                  ? '₱0.00'
                   : `₱${normalizedOrder.total.toFixed(2)}`}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Prompt description */}
+        {/* Instruction Card */}
         <View style={styles.instructionCard}>
-          <Ionicons name="information-circle" size={20} color={Colors.primary.default} />
-          <Text style={styles.instructionText}>
-            Pakita lamang ang QR code na ito sa cashier o barista upang i-scan at simulan ang paggawa ng iyong order. Maaari kang magbayad doon via Cash o Card.
-          </Text>
+          <View style={styles.instructionIconBox}>
+            <Ionicons name="bulb" size={18} color="#1D5FA7" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.instructionTitle}>Show this QR code to our staff</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+              <Text style={styles.instructionSubtitle}>Thank you and enjoy your coffee! ☕</Text>
+              <Ionicons name="heart" size={10} color="#93C5FD" style={{ marginLeft: 4 }} />
+            </View>
+          </View>
         </View>
-
-        {/* Action Button */}
-        <Button
-          title="Done & Back to Home"
-          variant="primary"
-          onPress={onBack}
-          style={styles.doneBtn}
-        />
       </ScrollView>
     </View>
   );
@@ -247,7 +271,7 @@ export default function GeneratedOrderQR({ order, onBack }: GeneratedOrderQRProp
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAF9F5',
+    backgroundColor: '#F6FAFD',
   },
   header: {
     flexDirection: 'row',
@@ -256,143 +280,228 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.neutral.gray200,
-    backgroundColor: '#FAF9F5',
+    backgroundColor: '#F6FAFD',
   },
   backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F3F0E6',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EBF5FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
     fontFamily: 'Poppins-Bold',
     fontSize: 18,
-    color: Colors.primary.default,
+    color: '#1D5FA7',
   },
   scrollBody: {
-    padding: 24,
-    paddingBottom: 48,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
   },
-  ticketCard: {
+  ticketContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
+    borderRadius: 28,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 4,
     borderWidth: 1,
-    borderColor: Colors.neutral.gray300,
-    padding: 24,
-    position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+    borderColor: '#E2E8F0',
     marginBottom: 20,
+    overflow: 'hidden',
   },
-  notchLeft: {
-    position: 'absolute',
-    left: -11,
-    top: '68%',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#FAF9F5',
-    borderWidth: 1,
-    borderColor: Colors.neutral.gray300,
-  },
-  notchRight: {
-    position: 'absolute',
-    right: -11,
-    top: '68%',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#FAF9F5',
-    borderWidth: 1,
-    borderColor: Colors.neutral.gray300,
-  },
-  ticketHeader: {
+  ticketTopBody: {
+    padding: 24,
     alignItems: 'center',
-    marginBottom: 16,
+    position: 'relative',
+  },
+  cloudWaveBg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 110,
+    backgroundColor: '#EEF6FE',
+    borderBottomLeftRadius: 60,
+    borderBottomRightRadius: 60,
+  },
+  mascotCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 2,
+    borderColor: '#E2E8F0',
+  },
+  mascotImg: {
+    width: 52,
+    height: 52,
   },
   storeName: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-    color: Colors.primary.default,
-    marginTop: 6,
+    fontSize: 22,
+    color: '#1D5FA7',
+    lineHeight: 26,
   },
   tagline: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 11,
-    color: Colors.neutral.gray500,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  brandDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+    width: 140,
+    justifyContent: 'center',
+  },
+  brandLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#CBD5E1',
   },
   tableBadge: {
-    backgroundColor: Colors.primary.default,
-    alignSelf: 'center',
-    paddingHorizontal: 16,
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 20,
     paddingVertical: 6,
     borderRadius: 20,
-    marginBottom: 24,
+    marginVertical: 10,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
- tableBadgeText: {
+  tableBadgeText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 12,
-    color: '#FAF9F5',
+    fontSize: 13,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
-  qrSection: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  qrBorder: {
+  qrFrame: {
     padding: 16,
-    borderWidth: 1.5,
-    borderColor: Colors.primary.default,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#3B82F6',
+    marginVertical: 12,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  ticketIdPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: '#FAF9F5',
-    marginBottom: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  qrImage: {
-    width: 260,
-    height: 260,
+  ticketIdIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
-  ticketId: {
+  ticketIdText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-    color: Colors.neutral.gray800,
-    letterSpacing: 2,
-    marginBottom: 6,
+    fontSize: 13,
+    color: '#1E293B',
+    letterSpacing: 0.8,
   },
   timerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginTop: 4,
   },
   timerText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 11,
-    color: Colors.neutral.gray600,
+    color: '#64748B',
   },
   boldTimer: {
     fontFamily: 'Poppins-Bold',
-    color: Colors.danger.default,
+    color: '#DC2626',
+  },
+  perforationWrapper: {
+    position: 'relative',
+    height: 24,
+    justifyContent: 'center',
+  },
+  notchLeft: {
+    position: 'absolute',
+    left: -12,
+    top: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F6FAFD',
+    borderRightWidth: 1,
+    borderColor: '#E2E8F0',
+    zIndex: 2,
+  },
+  notchRight: {
+    position: 'absolute',
+    right: -12,
+    top: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F6FAFD',
+    borderLeftWidth: 1,
+    borderColor: '#E2E8F0',
+    zIndex: 2,
   },
   dashedSeparator: {
     borderWidth: 1,
-    borderColor: Colors.neutral.gray300,
+    borderColor: '#CBD5E1',
     borderStyle: 'dashed',
     borderRadius: 1,
-    marginVertical: 18,
+    marginHorizontal: 16,
   },
   summarySection: {
-    paddingTop: 4,
+    padding: 24,
+    paddingTop: 16,
+  },
+  summaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  summaryTitleIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#EBF5FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
   sectionTitle: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 13,
-    color: Colors.primary.default,
-    marginBottom: 12,
+    fontSize: 14,
+    color: '#1D5FA7',
   },
   itemRow: {
     flexDirection: 'row',
@@ -402,20 +511,26 @@ const styles = StyleSheet.create({
   itemQty: {
     fontFamily: 'Poppins-Bold',
     fontSize: 12,
-    color: Colors.secondary.default,
+    color: '#2563EB',
     marginRight: 6,
     width: 24,
   },
   itemName: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
-    color: Colors.neutral.gray700,
+    color: '#334155',
     flex: 1,
   },
   itemPrice: {
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: 'Poppins-Bold',
     fontSize: 12,
-    color: Colors.neutral.gray800,
+    color: '#1E293B',
+  },
+  summaryDottedDivider: {
+    borderWidth: 0.5,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+    marginVertical: 10,
   },
   summaryMetaRow: {
     flexDirection: 'row',
@@ -423,51 +538,60 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   summaryMetaLabel: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
-    color: Colors.neutral.gray600,
+    color: '#64748B',
   },
   summaryMetaVal: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: 12,
-    color: Colors.neutral.gray800,
+    color: '#1E293B',
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
-    paddingTop: 12,
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: Colors.neutral.gray200,
+    borderTopColor: '#E2E8F0',
   },
   totalLabel: {
     fontFamily: 'Poppins-Bold',
     fontSize: 14,
-    color: Colors.primary.default,
+    color: '#1D5FA7',
   },
   totalVal: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-    color: Colors.secondary.default,
+    fontSize: 18,
+    color: '#16A34A',
   },
   instructionCard: {
     flexDirection: 'row',
-    backgroundColor: '#F3F0E6',
-    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 18,
     padding: 16,
-    gap: 12,
-    marginBottom: 24,
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.neutral.gray300,
+    borderColor: '#DBEAFE',
   },
-  instructionText: {
-    flex: 1,
-    fontFamily: 'Poppins',
+  instructionIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  instructionTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E3A8A',
+  },
+  instructionSubtitle: {
+    fontFamily: 'Poppins-Medium',
     fontSize: 11,
-    color: Colors.neutral.gray700,
-    lineHeight: 16,
-  },
-  doneBtn: {
-    height: 50,
+    color: '#3B82F6',
   },
 });

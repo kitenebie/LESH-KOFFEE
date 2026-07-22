@@ -98,7 +98,7 @@ export default function Home() {
       setActiveTab('QRCode');
     }
   }, [isSuperAdmin]);
-  const [profileInitialSubView, setProfileInitialSubView] = useState<'Main' | 'Addresses'>('Main');
+ const [profileInitialSubView, setProfileInitialSubView] = useState<'Main' | 'Addresses'>('Main');
   const [generatedOrder, setGeneratedOrder] = useState<any>(null);
   const [homeSubView, setHomeSubView] = useState<'Main' | 'BestSellers' | 'OurMenu' | 'Promos'>('Main');
   const stampCardTranslateY = React.useRef(new Animated.Value(height)).current;
@@ -152,6 +152,7 @@ export default function Home() {
 
   // 2. Customization States (Loaded dynamically from dummyData.json)
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
+  const [customizerQty, setCustomizerQty] = useState<number>(1);
   const [customSize, setCustomSize] = useState<string>('Regular');
   const [customSweetness, setCustomSweetness] = useState<string>('100%');
   const [customMilk, setCustomMilk] = useState<string>('Full Cream');
@@ -191,7 +192,7 @@ export default function Home() {
 
   // 4. Fulfillment & Payment states
   const [fulfillmentMode, setFulfillmentMode] = useState<'DineIn' | 'Delivery'>('DineIn');
-  const [paymentMethod, setPaymentMethod] = useState<'Wallet' | 'CardEWallet' | 'COD'>('Wallet');
+  const [paymentMethod, setPaymentMethod] = useState<'Wallet' | 'CardEWallet' | 'COD'>('COD');
 
   // 5. Reusable Custom Alert Modal State
   const [alertConfig, setAlertConfig] = useState<{
@@ -245,6 +246,33 @@ export default function Home() {
         const savedCart = await getCartItems();
         if (savedCart && savedCart.length > 0) {
           setCart(savedCart);
+        } else if (isLoggedIn) {
+          // SQLite cart is empty but user is logged in — try loading from server
+          try {
+            const { getCart } = await import('../../../services/cartService');
+            const serverCart = await getCart();
+            if (serverCart.items && serverCart.items.length > 0) {
+              const restoredCart = serverCart.items.map((item: any) => ({
+                product: {
+                  id: String(item.product?.id || item.product_id),
+                  categoryId: item.product?.categoryId || String(item.product?.category_id || ''),
+                  name: item.product?.name || '',
+                  description: item.product?.description || '',
+                  price: Number(item.product?.price || item.unit_price || 0),
+                  rating: item.product?.rating || 0,
+                  reviews: item.product?.reviews || 0,
+                  isPopular: item.product?.isPopular || false,
+                  image: item.product?.image || '',
+                },
+                quantity: item.quantity,
+                customization: item.customization || undefined,
+              }));
+              setCart(restoredCart);
+              if (serverCart.computed) setCartComputed(serverCart.computed);
+            }
+          } catch (e) {
+            // Server fetch failed — start with empty cart
+          }
         }
       } catch (error) {
         console.warn('Failed to load cart from SQLite:', error);
@@ -268,6 +296,9 @@ export default function Home() {
     loadPendingQR();
   }, []);
 
+  // Flag to skip server sync when clearing cart for sign-out
+  const isSigningOut = React.useRef(false);
+
   // Save cart to SQLite whenever it changes (after initial load)
   React.useEffect(() => {
     if (!isCartLoaded.current) return;
@@ -276,6 +307,29 @@ export default function Home() {
         await saveCartItems(cart);
       } catch (error) {
         console.warn('Failed to save cart to SQLite:', error);
+      }
+      // Sync to server
+      if (isLoggedIn && cart.length > 0) {
+        if (isSigningOut.current) return;
+        try {
+          const { syncCart } = await import('../../../services/cartService');
+          await syncCart(cart.map(item => ({
+            product_id: Number(item.product.id),
+            quantity: item.quantity,
+            customization: item.customization ? { selections: item.customization.selections } : null,
+          })));
+          // Fetch computed AFTER sync completes
+          fetchCartComputed();
+        } catch (e) {
+          // Silent — server sync is best-effort
+        }
+      }
+      // If cart is empty, clear on server too
+      if (isLoggedIn && cart.length === 0 && !isSigningOut.current) {
+        try {
+          const { clearCart } = await import('../../../services/cartService');
+          await clearCart();
+        } catch (e) {}
       }
     };
     persistCart();
@@ -370,6 +424,7 @@ export default function Home() {
 
   // Cart slide-in trigger from header
   const openCartView = () => {
+    fetchCartComputed();
     Animated.spring(cartTranslateX, {
       toValue: 0,
       tension: 40,
@@ -575,7 +630,7 @@ export default function Home() {
     closeGift();
     showAlert(
       'Gift Sent! 🎁',
-      `Lesh Gift of ₱${amount} has been sent. Notification shared to +63 ${giftPhone} via WhatsApp.`
+      `Foam Gift of ₱${amount} has been sent. Notification shared to +63 ${giftPhone} via WhatsApp.`
     );
     setGiftPhone('');
     setGiftAmount('');
@@ -596,6 +651,7 @@ export default function Home() {
 
     if (config && product.customizable) {
       setCustomizingProduct(product);
+      setCustomizerQty(1);
       
       const dynamicConfig = config.customizations || config;
       const initialSelections: Record<string, string[]> = {};
@@ -692,12 +748,12 @@ export default function Home() {
 
     if (existingIndex > -1) {
       const newCart = [...cart];
-      newCart[existingIndex].quantity += 1;
+      newCart[existingIndex].quantity += customizerQty;
       setCart(newCart);
     } else {
       setCart([...cart, { 
         product: customizedProduct, 
-        quantity: 1,
+        quantity: customizerQty,
         customization: {
           size: sizeSelection,
           sweetness: sweetnessSelection,
@@ -789,83 +845,59 @@ export default function Home() {
 
   // Cart totals
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cart.reduce((sum, item) => {
-    const basePrice = Number(item.product.price);
-    const extraPrice = item.customization?.price ? (Number(item.customization.price) - basePrice) : 0;
-    return sum + (basePrice + extraPrice) * item.quantity;
-  }, 0);
-  const deliveryFee = fulfillmentMode === 'Delivery' ? 49 : 0;
+  // ─── SERVER-COMPUTED CART STATE ─────────────────────────────────────
+  // All calculations come from the server (CartCalculationService)
+  const [cartComputed, setCartComputed] = React.useState<any>({
+    subtotal: 0, delivery_fee: 0, subscription_discount: 0, subscription_items_covered: 0,
+    voucher_discount: 0, applied_vouchers: [], perk_discount: 0, perks_applied: [],
+    total_discount: 0, total: 0, item_count: 0,
+  });
 
-  // Subscription Discount calculation
-  const getSubscriptionDiscount = () => {
-    if (subscriptionBalance <= 0) return 0;
-    const drinkPrices = cart
-      .filter((item) => item.product.categoryId === 'drinks')
-      .flatMap((item) => Array(item.quantity).fill(item.product.price))
-      .sort((a, b) => b - a);
-
-    const drinksCovered = Math.min(subscriptionBalance, drinkPrices.length);
-    return drinkPrices.slice(0, drinksCovered).reduce((sum, price) => sum + price, 0);
-  };
-  const subscriptionDiscount = getSubscriptionDiscount();
-
-  // Subscription Perk Discount (e.g. 10% food discount)
-  const { perkDiscount, perksApplied } = React.useMemo(() => {
-    if (!activeSubscription || cart.length === 0) return { perkDiscount: 0, perksApplied: [] };
-
-    // Find active subscription's perks from dummyData
-    const activePlan = (dummyData?.subscriptions || []).find((s: any) => s.name === activeSubscription);
-    const perks = activePlan?.perks || [];
-    if (perks.length === 0) return { perkDiscount: 0, perksApplied: [] };
-
-    let totalPerkDiscount = 0;
-    const applied: any[] = [];
-
-    perks.forEach((perk: any) => {
-      // Find cart items matching perk's category
-      const matchingItems = cart.filter(item => String(item.product.categoryId) === String(perk.category_id));
-      if (matchingItems.length === 0) return;
-
-      let perkAmount = 0;
-      matchingItems.forEach(item => {
-        const itemPrice = Number(item.product.price) * item.quantity;
-        if (perk.discount_type === 'percent') {
-          const disc = itemPrice * (perk.discount_value / 100);
-          perkAmount += perk.max_discount ? Math.min(disc, perk.max_discount) : disc;
-        } else {
-          perkAmount += Math.min(perk.discount_value, itemPrice) * item.quantity;
-        }
-      });
-
-      if (perkAmount > 0) {
-        totalPerkDiscount += perkAmount;
-        applied.push({ category_name: perk.category_name, discount_type: perk.discount_type, discount_value: perk.discount_value, applied_discount: perkAmount });
-      }
-    });
-
-    return { perkDiscount: Math.round(totalPerkDiscount * 100) / 100, perksApplied: applied };
-  }, [cart, activeSubscription, dummyData?.subscriptions]);
-
-  // Eligible subtotal for voucher discount
-  const eligibleSubtotal = Math.max(0, cartTotal - subscriptionDiscount);
-
-  // Voucher Discount calculation
-  const voucherDiscount = appliedVouchers.reduce((sum, v) => {
-    // Check min order amount requirement
-    const minOrder = v.min_order_amount ? Number(v.min_order_amount) : 0;
-    if (minOrder > 0 && eligibleSubtotal < minOrder) return sum;
-
-    if (v.type === 'fixed') {
-      // Only apply if subtotal can cover the fixed discount
-      return eligibleSubtotal >= v.discount ? sum + v.discount : sum;
+  // Fetch computed cart from server whenever cart changes
+  const fetchCartComputed = React.useCallback(async () => {
+    if (!isLoggedIn || cart.length === 0) {
+      setCartComputed({ subtotal: 0, delivery_fee: 0, subscription_discount: 0, subscription_items_covered: 0, subscription_name: null, voucher_discount: 0, applied_vouchers: [], perk_discount: 0, perks_applied: [], total_discount: 0, total: 0, item_count: 0 });
+      return;
     }
-    // Percent: apply with cap if max_discount exists
-    const raw = eligibleSubtotal * v.discount;
-    return sum + Math.min(raw, v.max_discount || Infinity);
-  }, 0);
+    try {
+      const { getCart } = await import('../../../services/cartService');
+      const result = await getCart();
+      if (result.computed) {
+        setCartComputed(result.computed);
+      }
+    } catch (e) {
+      // Fallback: basic local calculation if server unavailable
+      const localTotal = cart.reduce((sum, item) => sum + Number(item.product.price) * item.quantity, 0);
+      setCartComputed(prev => ({ ...prev, subtotal: localTotal, total: localTotal, subscription_name: null, applied_vouchers: [] }));
+    }
+  }, [isLoggedIn, cart]);
 
-  // Grand Total
-  const grandTotal = Math.max(0, eligibleSubtotal - voucherDiscount - perkDiscount) + deliveryFee;
+  // Sync meta to server when fulfillment/vouchers/subscription change, then re-fetch computed
+  React.useEffect(() => {
+    if (!isLoggedIn || cart.length === 0) return;
+    const syncMeta = async () => {
+      try {
+        const { updateCartMeta } = await import('../../../services/cartService');
+        await updateCartMeta({
+          fulfillment_mode: fulfillmentMode,
+          applied_voucher_codes: appliedVouchers.map(v => v.code),
+          use_subscription: subscriptionBalance > 0,
+          subscription_items_to_use: subscriptionBalance,
+        });
+        fetchCartComputed();
+      } catch (e) {}
+    };
+    syncMeta();
+  }, [fulfillmentMode, appliedVouchers, subscriptionBalance]);
+
+  // Destructure server-computed values for easy access
+  const cartTotal = cartComputed.subtotal;
+  const deliveryFee = cartComputed.delivery_fee;
+  const subscriptionDiscount = cartComputed.subscription_discount;
+  const voucherDiscount = cartComputed.voucher_discount;
+  const perkDiscount = cartComputed.perk_discount;
+  const perksApplied = cartComputed.perks_applied || [];
+  const grandTotal = cartComputed.total;
 
   // Wallet top-up execution
   const executeTopUp = async () => {
@@ -887,7 +919,7 @@ export default function Home() {
     const result = await createCheckout({
       amount: parsedAmount,
       order_id: paramId,
-      description: `Lesh Wallet Top-Up - ₱${parsedAmount.toFixed(2)}`,
+      description: `Foam Wallet Top-Up - ₱${parsedAmount.toFixed(2)}`,
       email: dummyData?.user?.email || undefined,
       contact: dummyData?.user?.phone || undefined,
       name: dummyData?.user?.name || undefined,
@@ -904,7 +936,6 @@ export default function Home() {
       showAlert('Payment Error', result.message || 'Failed to generate payment link. Please try again.');
     }
   };
-
   // Buy a subscription
   const handleBuySubscription = async (subName: string, price: number, drinkCount: number, subscriptionId?: number) => {
     showAlert('Processing...', 'Generating payment link for subscription.', undefined, true);
@@ -916,7 +947,7 @@ export default function Home() {
     const result = await createCheckout({
       amount: price,
       order_id: paramId,
-      description: `Lesh Subscription - "${subName}" (${drinkCount} drinks)`,
+      description: `Foam Subscription - "${subName}" (${drinkCount} drinks)`,
       email: dummyData?.user?.email || undefined,
       contact: dummyData?.user?.phone || undefined,
       name: dummyData?.user?.name || undefined,
@@ -933,10 +964,11 @@ export default function Home() {
       showAlert('Payment Error', result.message || 'Failed to generate payment link. Please try again.');
     }
   };
+  
 
   // Proceed checkout flow
-  const handleCheckoutClick = () => {
-    // Cash payment (both DineIn and Delivery) → Generate order code
+  const handleCheckoutClick = async () => {
+    // Cash payment (both DineIn and Delivery)
     if (paymentMethod === 'COD') {
       const drinkItemsCount = cart.filter((item) => item.product.categoryId === 'drinks')
                                   .reduce((sum, item) => sum + item.quantity, 0);
@@ -950,6 +982,104 @@ export default function Home() {
       const now = new Date();
       const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
       const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+      if (fulfillmentMode === 'Delivery') {
+        const orderId = `LK-DEL-${Math.floor(10000 + Math.random() * 90000)}`;
+        const defaultAddress = dummyData?.user?.addresses?.find((addr: any) => addr.isDefault)?.address || 'Manila Gate Road, Manila, Philippines';
+
+        closeCartView();
+        showAlert('Placing Order... ☕', 'Sending your delivery order to the store. Please wait...', undefined, true);
+
+        try {
+          const createdServerOrder = await createOrder({
+            order_number: orderId,
+            fulfillment: fulfillmentMode,
+            table_no: 'Delivery',
+            cashier: 'Online',
+            delivery_address: defaultAddress,
+            subtotal: cartTotal,
+            delivery_fee: deliveryFee,
+            discount: subscriptionDiscount + voucherDiscount + perkDiscount,
+            subscription_discount: subscriptionDiscount,
+            voucher_discount: voucherDiscount,
+            perk_discount: perkDiscount,
+            voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
+            subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
+            total: grandTotal,
+            payment_method: 'COD',
+            items: cart.map(item => {
+              const basePrice = Number(item.product.price);
+              const extraPrice = item.customization?.price ? (Number(item.customization.price) - basePrice) : 0;
+              return {
+                product_id: Number(item.product.id),
+                name: item.product.name,
+                quantity: item.quantity,
+                price: basePrice + extraPrice,
+                customization: item.customization || null,
+              };
+            })
+          });
+
+          const deliveryOrder = {
+            id: createdServerOrder?.order_number || orderId,
+            order_number: createdServerOrder?.order_number || orderId,
+            user_id: Number(dummyData?.user?.id || 0),
+            date: dateStr,
+            time: timeStr,
+            status: 'Preparing',
+            currentStep: 'preparing' as const,
+            fulfillment: fulfillmentMode,
+            ref_no: 'Delivery',
+            cashier: 'Online',
+            payment_method: 'COD',
+            lineItems: cart.map(item => {
+              const bp = Number(item.product.price);
+              const ep = item.customization?.price ? (Number(item.customization.price) - bp) : 0;
+              return {
+                name: item.product.name,
+                qty: item.quantity,
+                price: bp + ep,
+              };
+            }),
+            items: cart.map(item => {
+              const bp = Number(item.product.price);
+              const ep = item.customization?.price ? (Number(item.customization.price) - bp) : 0;
+              return {
+                product_id: Number(item.product.id),
+                name: item.product.name,
+                quantity: item.quantity,
+                price: bp + ep,
+                customization: item.customization || null,
+              };
+            }),
+            subtotal: cartTotal,
+            deliveryFee: deliveryFee,
+            discount: subscriptionDiscount + voucherDiscount + perkDiscount,
+            total: grandTotal,
+            voucherCode: appliedVouchers.map(v => v.code).join(',') || null,
+            voucherDiscount: voucherDiscount,
+            subscriptionDiscount: subscriptionDiscount,
+            perkDiscount: perkDiscount,
+            subscription_items_used: subscriptionDiscount > 0 ? Math.min(subscriptionBalance, cart.filter(i => i.product.categoryId === 'drinks').reduce((s, i) => s + i.quantity, 0)) : 0,
+            createdAt: new Date().toISOString(),
+          };
+
+          addOrderLocal(deliveryOrder);
+
+          setCart([]);
+          setAppliedVouchers([]);
+          setVoucherCode('');
+          setVoucherStatus('idle');
+          setActiveTab('Orders');
+          showAlert(
+            'Order Placed! 🛵',
+            `Your delivery order (${deliveryOrder.order_number}) has been placed via COD for ₱${grandTotal.toFixed(2)}.`
+          );
+        } catch (err) {
+          showAlert('Order Error', 'Failed to place delivery order. Please try again.');
+        }
+        return;
+      }
 
       const dineInOrder = {
         order_number: `LK-QR-${Math.floor(10000 + Math.random() * 90000)}`,
@@ -1008,7 +1138,7 @@ export default function Home() {
       return;
     }
 
-    // Lesh Wallet → direct charge
+    // Foam Wallet → direct charge
     executeFinalCheckout(false);
   };
 
@@ -1089,7 +1219,7 @@ export default function Home() {
       setPendingTopUpAmount(0);
       showAlert(
         'Top-Up Successful! 💳',
-        `₱${amount.toFixed(2)} has been loaded into your Lesh Digital Wallet.`
+        `₱${amount.toFixed(2)} has been loaded into your Foam Digital Wallet.`
       );
 
     } else if (checkoutPurpose === 'subscription') {
@@ -1121,6 +1251,15 @@ export default function Home() {
 
     } else {
       // ─── ORDER PAYMENT SUCCESS ───
+      // Mark order as paid on server (in case webhook hasn't arrived yet)
+      try {
+        const { markOrderPaid } = await import('../../../services/ordersService');
+        await markOrderPaid(checkoutOrderId);
+      } catch (e) {
+        // Webhook will handle it eventually
+        console.warn('[Payment] Failed to mark order paid directly:', e);
+      }
+
       const now = new Date();
       const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
       const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -1289,7 +1428,7 @@ export default function Home() {
         setWalletBalance(walletBalance - finalTotal);
         showAlert(
           'Order Placed! ☕',
-          `₱${finalTotal.toFixed(2)} has been charged to your Lesh Digital Wallet.`
+          `₱${finalTotal.toFixed(2)} has been charged to your Foam Digital Wallet.`
         );
       } else {
         // Server debit failed — show error, don't clear cart
@@ -1340,17 +1479,55 @@ export default function Home() {
               onAddProduct={(product, event) => handleAddClick(product as any, event)}
             />
           ) : homeSubView === 'Promos' ? (
-            <PromoDiscount
-              promos={dummyData.promos as any}
-              claimedVoucherCodes={dummyData.vouchers?.map((v: any) => v.code) || []}
-              vouchers={dummyData.vouchers as any}
-              onBack={() => setHomeSubView('Main')}
-              onSendGift={() => {
-                setHomeSubView('Main');
-                setShowGiftModal(true);
-              }}
-              showAlert={showAlert}
-            />
+            (() => {
+              const uniqueVouchersMap = new Map();
+              
+              // 1. Add unclaimed available vouchers (from database)
+              (unclaimedVouchers || []).forEach((v: any) => {
+                if (v && v.code) {
+                  uniqueVouchersMap.set(v.code, {
+                    id: v.id,
+                    code: v.code,
+                    discount: v.discount,
+                    label: v.label,
+                    type: v.type || 'percent',
+                    min_order_amount: v.min_order_amount,
+                    max_discount: v.max_discount,
+                  });
+                }
+              });
+              
+              // 2. Add claimed user vouchers
+              (dummyData.vouchers || []).forEach((v: any) => {
+                if (v && v.code) {
+                  uniqueVouchersMap.set(v.code, {
+                    id: v.id || v.voucher_id,
+                    code: v.code,
+                    discount: v.discount,
+                    label: v.label,
+                    type: v.type || 'percent',
+                    min_order_amount: v.min_order_amount,
+                    max_discount: v.max_discount,
+                  });
+                }
+              });
+              
+              const combinedVouchers = Array.from(uniqueVouchersMap.values());
+
+              return (
+                <PromoDiscount
+                  promos={dummyData.promos as any}
+                  claimedVoucherCodes={dummyData.vouchers?.map((v: any) => v.code) || []}
+                  vouchers={combinedVouchers}
+                  onBack={() => setHomeSubView('Main')}
+                  onSendGift={() => {
+                    setHomeSubView('Main');
+                    setShowGiftModal(true);
+                  }}
+                  showAlert={showAlert}
+                />
+              );
+            })()
           ) : (
             <View style={{ flex: 1 }}>
               {/* Floating Top Header Section */}
@@ -1441,96 +1618,178 @@ export default function Home() {
                 </View>
               </View>
 
+
               {/* Scrollable Feed Section */}
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollFeedContainer}>
               
               {/* POINTS & LOYALTY CARD TEASER */}
               {searchQuery === '' && isLoggedIn && (
               <ReAnimated.View entering={ZoomIn.delay(200).duration(400)} style={styles.loyaltyTeaserCard}>
-                <View style={styles.loyaltyTeaserLeft}>
-                  <Text style={styles.loyaltyTeaserTitle}>Lesh Loyalty Points</Text>
-                  <Text style={styles.loyaltyTeaserPoints}>{(Number(dummyData?.user?.loyaltyPoints) || 0).toLocaleString()} <Text style={styles.pointsLabel}>Points</Text></Text>
-                  <View style={styles.loyaltyMiniProgressBg}>
-                    <View style={[styles.loyaltyMiniProgressFill, { width: `${((dummyData.stamps?.achievements?.[0]?.collected || 0) / (dummyData.stamps?.achievements?.[0]?.required || 1)) * 100}%` }]} />
+                 {/* Background Waves (Simulated) */}
+                <View style={styles.loyaltyBgWaveDark} pointerEvents="none" />
+                <View style={styles.loyaltyBgWaveLight} pointerEvents="none" />
+
+                <View style={styles.loyaltyTopRow}>
+                  {/* Left: 3D Cloud Logo & Sparkles */}
+                  <View style={styles.loyaltyLogoContainer}>
+                    <Image source={require('../../../assets/app/logo.png')} style={styles.loyaltyCloudImg} resizeMode="contain" />
+                    <Ionicons name="sparkles" size={12} color="#FFFFFF" style={styles.loyaltySparkle1} />
+                    <Ionicons name="sparkle" size={10} color="#FFFFFF" style={styles.loyaltySparkle2} />
                   </View>
-                  <Text style={styles.loyaltyProgressText}>{dummyData.stamps?.achievements?.[0]?.collected || 0} of {dummyData.stamps?.achievements?.[0]?.required || 8} cups collected for a free drink!</Text>
+                   {/* Middle: Text and Badge */}
+                  <View style={styles.loyaltyCenterText}>
+                    <View style={styles.loyaltyPointsHeaderRow}>
+                      <Text style={styles.loyaltyTitleText}>Foam Loyalty Points</Text>
+                      <Ionicons name="information-circle-outline" size={12} color="#1D5FA7" style={{ marginLeft: 4 }} />
+                    </View>
+                    <View style={styles.loyaltyPointsValRow}>
+                      <Text style={styles.loyaltyPointsBigText}>{(Number(dummyData?.user?.loyaltyPoints) || 100).toLocaleString()}</Text>
+                      <Text style={styles.loyaltyPointsLabelText}>Points</Text>
+                    </View>
+                    <View style={styles.loyaltyPraiseBadge}>
+                      <Ionicons name="star" size={10} color="#F59E0B" style={{ marginRight: 4 }} />
+                      <Text style={styles.loyaltyPraiseText}>You're doing great!</Text>
+                    </View>
+                  </View>
+
+                  {/* Right: View Stamps Button */}
+                  <TouchableOpacity 
+                    style={styles.loyaltyViewStampsBtn}
+                    onPress={() => navigateToStampCard('Home')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="gift" size={20} color="#1D5FA7" style={{ marginBottom: 4 }} />
+                    <Text style={styles.loyaltyViewStampsBtnText}>View</Text>
+                    <Text style={styles.loyaltyViewStampsBtnText}>Stamps</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity 
-                  style={styles.loyaltyTeaserRight}
-                  onPress={() => navigateToStampCard('Home')}
-                >
-                  <Ionicons name="gift" size={32} color="#FAF9F5" />
-                  <Text style={styles.viewStampsText}>View Stamps</Text>
-                </TouchableOpacity>
+
+                {/* Bottom: Progress Area */}
+                <View style={styles.loyaltyBottomRow}>
+                  <Text style={styles.loyaltyProgressCupsText}>
+                    <Text style={{ fontFamily: 'Poppins-Bold', color: '#1D5FA7' }}>
+                      {dummyData.stamps?.achievements?.[0]?.collected || 0} of {dummyData.stamps?.achievements?.[0]?.required || 8}
+                    </Text> cups collected for a free drink!
+                  </Text>
+                  
+                  <View style={styles.loyaltyProgressSection}>
+                    <View style={styles.loyaltyProgressLeftCol}>
+                      {/* Cups Track */}
+                      <View style={styles.loyaltyCupsList}>
+                        {Array.from({ length: dummyData.stamps?.achievements?.[0]?.required || 8 }).map((_, i) => (
+                          <Ionicons 
+                            key={i} 
+                            name="cafe-outline" 
+                            size={18} 
+                            color={i < (dummyData.stamps?.achievements?.[0]?.collected || 0) ? '#1D5FA7' : '#A0C4E8'} 
+                          />
+                        ))}
+                      </View>
+                      
+                      {/* Progress Line Track */}
+                      <View style={styles.loyaltyProgressLineBg}>
+                        <View style={[styles.loyaltyProgressLineFill, { width: `${Math.min(100, Math.max(5, ((dummyData.stamps?.achievements?.[0]?.collected || 0) / (dummyData.stamps?.achievements?.[0]?.required || 1)) * 100))}%` }]} />
+                        <View style={[styles.loyaltyProgressLineDot, { left: `${Math.min(100, Math.max(0, ((dummyData.stamps?.achievements?.[0]?.collected || 0) / (dummyData.stamps?.achievements?.[0]?.required || 1)) * 100))}%` }]} />
+                      </View>
+                    </View>
+
+                    {/* Target Badge */}
+                    <View style={styles.loyaltyCupsTargetBadge}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="cafe-outline" size={16} color="#1D5FA7" style={{ marginRight: 2 }} />
+                        <Text style={styles.loyaltyCupsTargetBadgeVal}>{dummyData.stamps?.achievements?.[0]?.required || 8}</Text>
+                      </View>
+                      <Text style={styles.loyaltyCupsTargetBadgeLabel}>Cups</Text>
+                    </View>
+                  </View>
+                </View>
               </ReAnimated.View>
             )}
-
+            
             {/* PROMOS & DISCOUNTS CAROUSEL */}
             {searchQuery === '' && (
               <ReAnimated.View entering={ZoomIn.delay(300).duration(400)} style={styles.promoSection}>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionTitle}>Promos & Discounts</Text>
-                  <TouchableOpacity onPress={() => setHomeSubView('Promos')}>
+                  <TouchableOpacity onPress={() => setHomeSubView('Promos')} style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.seeMoreText}>See More</Text>
+                    <Ionicons name="chevron-forward" size={14} color="#2D78CD" style={{ marginLeft: 2 }} />
                   </TouchableOpacity>
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promoScroll}>
-                  {dummyData.promos.map((promo) => (
-                    <View key={promo.id} style={[styles.promoCardContainer, { backgroundColor: promo.color }]}>
-                      {/* Left Side */}
-                      <View style={styles.promoCardLeft}>
-                        <View>
-                          <Text style={styles.promoCardHeading}>{promo.heading}</Text>
-                          <Text style={styles.promoCardSubheading}>{promo.subheading}</Text>
-                        </View>
-                        
-                        {/* Action/Code Pill */}
-                        <View style={styles.promoCardActionRow}>
-                          {promo.id === 'pr3' ? (
-                            <TouchableOpacity
-                              style={styles.promoPillButton}
-                              onPress={() => setShowGiftModal(true)}
-                              activeOpacity={0.8}
-                            >
-                              <Text style={styles.promoPillBtnText}>Send Gift</Text>
-                              <Ionicons name="arrow-forward" size={11} color="#FFF" style={{ marginLeft: 4 }} />
-                            </TouchableOpacity>
-                          ) : (
-                            <View style={styles.promoPill}>
-                              <View style={styles.promoPillLabel}>
-                                <Text style={styles.promoPillLabelText}>code</Text>
+                  {dummyData.promos.map((promo, idx) => {
+                    const isFirst = idx % 2 === 0;
+                    return (
+                       <View 
+                        key={promo.id || idx} 
+                        style={[
+                          styles.promoCardWrapper, 
+                          isFirst ? styles.promoCardBlue : styles.promoCardPeach
+                        ]}
+                      >
+                        {/* Background Decor (only for Blue card) */}
+                        {isFirst && (
+                          <View style={styles.promoBlueRaysContainer}>
+                            <View style={styles.promoBlueRay1} />
+                            <View style={styles.promoBlueRay2} />
+                            <View style={styles.promoBlueRay3} />
+                          </View>
+                        )}
+
+                        <View style={styles.promoCardContentInner}>
+                          {/* Top Pill Badge */}
+                          <View style={[styles.promoTopBadge, isFirst ? styles.promoTopBadgeBlue : styles.promoTopBadgePeach]}>
+                            <Ionicons name={isFirst ? "time-outline" : "flame"} size={10} color={isFirst ? "#FFFFFF" : "#D25400"} />
+                            <Text style={[styles.promoTopBadgeText, isFirst ? styles.promoTopBadgeTextBlue : styles.promoTopBadgeTextPeach]}>
+                              {isFirst ? "Limited Time" : "Weekend Deal"}
+                            </Text>
+                          </View>
+
+                          {/* Titles */}
+                          <Text style={[styles.promoLargeHeading, isFirst ? styles.promoTextWhite : styles.promoTextDark]}>
+                            {promo.heading || (isFirst ? "50% OFF" : "Buy 1\nGet 1")}
+                          </Text>
+                          <Text style={[styles.promoSubHeading, isFirst ? styles.promoTextWhite : styles.promoTextDark]}>
+                            {promo.subheading || (isFirst ? "on your 1st order!" : "On selected drinks")}
+                          </Text>
+
+                          {/* Code Box */}
+                          <View style={[styles.promoCodeBox, isFirst ? styles.promoCodeBoxBlue : styles.promoCodeBoxPeach]}>
+                            <Text style={[styles.promoCodeBoxText, isFirst ? styles.promoTextWhite : styles.promoTextDark]}>CODE</Text>
+                            <View style={[styles.promoCodeBoxDivider, isFirst ? styles.promoCodeBoxDividerBlue : styles.promoCodeBoxDividerPeach]} />
+                            <Text style={[styles.promoCodeBoxVal, isFirst ? styles.promoTextWhite : styles.promoTextDark]}>
+                              {promo.code || (isFirst ? "LESH50" : "BOGO")}
+                            </Text>
+                          </View>
+
+                          {/* Bottom Row */}
+                          <View style={styles.promoBottomRow}>
+                            <Text style={[styles.promoTermsText, isFirst ? styles.promoTextWhite : styles.promoTextDark]}>
+                              T&Cs apply.
+                            </Text>
+                            {isFirst && (
+                              <View style={styles.promoDeliveryBadge}>
+                                <Ionicons name="bicycle" size={10} color="#FFFFFF" />
+                                <Text style={styles.promoDeliveryBadgeText}>Free delivery</Text>
                               </View>
-                              <View style={styles.promoPillValue}>
-                                <Text style={styles.promoPillValueText}>{promo.code}</Text>
-                              </View>
-                            </View>
-                          )}
+                            )}
+                          </View>
                         </View>
-
-                        <Text style={styles.promoCardFootnote}>T&Cs apply.</Text>
-                      </View>
-
-                      {/* Right Side (Image + Diagonal cut shape) */}
-                      <View style={styles.promoCardRight}>
-                        {/* Background Cut Shape */}
-                        <View style={styles.promoImageBgShape} />
-                        
-                        {/* Product Image */}
-                        <Image source={{ uri: promo.image }} style={styles.promoProductImage} resizeMode="cover" />
-                      </View>
-
-                      {/* Float Badge */}
-                      {promo.badge && (
-                        <View style={styles.promoFloatBadge}>
-                          <Text style={styles.promoFloatBadgeText}>{promo.badge}</Text>
+                        {/* Right Side Image for all cards */}
+                        <View style={styles.promoRightImageContainer}>
+                          <Image 
+                            source={typeof promo.image === 'string' && promo.image ? { uri: promo.image } : (promo.image || require('../../../assets/app/latte-art.jpg'))} 
+                            style={styles.promoLatteImg} 
+                            resizeMode="cover"
+                            defaultSource={require('../../../assets/app/logo.png')}
+                          />
                         </View>
-                      )}
-                    </View>
-                  ))}
+                      </View>
+                                          );
+                  })}
                 </ScrollView>
-              </ReAnimated.View>
+                </ReAnimated.View>
             )}
-
             {/* BEST SELLERS MENU */}
             {searchQuery === '' && (
               <ReAnimated.View entering={ZoomIn.delay(400).duration(400)} style={styles.popularSection}>
@@ -1656,68 +1915,7 @@ export default function Home() {
               )}
             </ReAnimated.View>
 
-            {/* SPECIAL HIGHLIGHT */}
-            {searchQuery === '' && (
-              <ReAnimated.View entering={ZoomIn.delay(700).duration(400)} style={styles.highlightSection}>
-                <Text style={styles.sectionTitle}>{"Barista's Special Highlight"}</Text>
-                <View style={styles.highlightCard}>
-                  <Image 
-                    source={{ uri: 'https://images.unsplash.com/photo-1570968915860-54d5c301fc9f?q=80&w=600&auto=format&fit=crop' }} 
-                    style={styles.highlightImage} 
-                  />
-                  <View style={styles.highlightOverlay}>
-                    <View style={styles.highlightInfo}>
-                      <View style={styles.specialBadge}>
-                        <Ionicons name="sparkles" size={10} color="#FAF9F5" style={{ marginRight: 4 }} />
-                        <Text style={styles.specialBadgeText}>Special Highlight</Text>
-                      </View>
-                      <Text style={styles.highlightName}>Lesh Velvet Cream Macchiato</Text>
-                      <Text style={styles.highlightDesc} numberOfLines={2}>
-                        Double-shot heritage Barako espresso, layered with wild honey syrup, creamed vanilla oat milk, and a dusting of toasted cinnamon.
-                      </Text>
-                      <View style={styles.highlightFooter}>
-                        <Text style={styles.highlightPrice}>₱195.00</Text>
-                        <TouchableOpacity 
-                          style={styles.highlightOrderBtn}
-                          onPress={(e) => handleAddClick({
-                            id: 'spec1',
-                            categoryId: 'drinks',
-                            name: 'Lesh Velvet Cream Macchiato',
-                            description: 'Double-shot heritage Barako espresso layered with wild honey and vanilla oat milk.',
-                            price: 195.00,
-                            rating: 5.0,
-                            reviews: 42,
-                            isPopular: true,
-                            image: 'https://images.unsplash.com/photo-1570968915860-54d5c301fc9f?q=80&w=600&auto=format&fit=crop'
-                          }, e)}
-                        >
-                          <Text style={styles.highlightOrderText}>Order Now</Text>
-                          <Ionicons name="cart" size={16} color={Colors.primary.default} style={{ marginLeft: 4 }} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              </ReAnimated.View>
-            )}
 
-            {/* CUSTOMER OF THE MONTH */}
-            {searchQuery === '' && dummyData?.store?.spotlightCustomer?.name && (
-              <ReAnimated.View entering={ZoomIn.delay(800).duration(400)} style={styles.spotlightSection}>
-                <Text style={styles.sectionTitle}>Customer of the Month 👑</Text>
-                <View style={styles.spotlightCard}>
-                  <Image 
-                    source={{ uri: dummyData.store.spotlightCustomer.avatar }} 
-                    style={styles.spotlightAvatar} 
-                  />
-                  <View style={styles.spotlightContent}>
-                    <Text style={styles.spotlightName}>{dummyData.store.spotlightCustomer.name}</Text>
-                    <Text style={styles.spotlightStat}>Ordered <Text style={styles.boldText}>{dummyData.store.spotlightCustomer.cupsThisMonth} Cups</Text> this month!</Text>
-                    <Text style={styles.spotlightReward}>{dummyData.store.spotlightCustomer.reward}</Text>
-                  </View>
-                </View>
-              </ReAnimated.View>
-            )}
 
             {/* STORE LOCATION & CONTACT INFO */}
             {searchQuery === '' && (
@@ -1817,6 +2015,7 @@ export default function Home() {
           <Text style={[styles.navText, activeTab === 'QRCode' && styles.navTextActive]}>
             QR Code
           </Text>
+          {activeTab === 'QRCode' && <View style={styles.activeNavIndicator} />}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1831,15 +2030,25 @@ export default function Home() {
           <Text style={[styles.navText, activeTab === 'CreateOrder' && styles.navTextActive]}>
             Create Order
           </Text>
+          {activeTab === 'CreateOrder' && <View style={styles.activeNavIndicator} />}
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.navItem}
           onPress={() => {
-            showAlert('Sign Out', 'Are you sure you want to sign out?', async () => {
-              await logout();
-              router.replace('/');
-            });
+            showAlert(
+              'Sign Out',
+              'Are you sure you want to sign out?',
+              async () => {
+                isSigningOut.current = true;
+                await logout();
+                const { clearAllCache } = await import('../../../lib/database');
+                await clearAllCache();
+                router.replace('/');
+              },
+              false,
+              true
+            );
           }}
         >
           <Ionicons
@@ -1898,7 +2107,7 @@ export default function Home() {
             color={activeTab === 'Wallet' ? Colors.primary.default : Colors.neutral.gray500} 
           />
           <Text style={[styles.navText, activeTab === 'Wallet' && styles.navTextActive]}>
-            Lesh Wallet
+            Foam Wallet
           </Text>
         </TouchableOpacity>
 
@@ -1920,8 +2129,7 @@ export default function Home() {
         </TouchableOpacity>
       </View>
       )}
-
-      {/* ==================== ANIMATION LAYER (FLYING PRODUCTS) ==================== */}
+{/* ==================== ANIMATION LAYER (FLYING PRODUCTS) ==================== */}
       {flyingItems.map((item) => (
         <Animated.View
           key={item.id}
@@ -1941,16 +2149,32 @@ export default function Home() {
           </View>
         </Animated.View>
       ))}
-
-      {/* ==================== INTERACTIVE      {/* CUSTOMIZATION MODAL */}
+ {/* ==================== INTERACTIVE      {/* CUSTOMIZATION MODAL */}
       {customizingProduct && (() => {
         const customizingProductId = customizingProduct.id;
         const productCustomConfig = (dummyData as any).customizationOptions?.[customizingProductId];
+
+        const calculatedCustomPrice = (() => {
+          let base = Number(customizingProduct.price) || 0;
+          const dynamicConfig = productCustomConfig?.customizations || productCustomConfig;
+          if (dynamicConfig) {
+            Object.entries(dynamicConfig).forEach(([key, val]: [string, any]) => {
+              if (!val || typeof val !== 'object' || !val.options) return;
+              const selections = customSelections[key] || [];
+              selections.forEach((selName) => {
+                const optionObj = val.options.find((o: any) => o.name === selName);
+                if (optionObj) base += Number(optionObj.price || 0);
+              });
+            });
+          }
+          return base;
+        })();
+        
         return (
           <View style={styles.modalOverlay}>
             <Animated.View
               style={[
-                styles.modalContent,
+                styles.modalContentCustomizer,
                 {
                   opacity: customizerOpacity,
                   borderRadius: customizerBorderRadius,
@@ -1962,115 +2186,239 @@ export default function Home() {
                 }
               ]}
             >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {customizingProduct.categoryId === 'drinks' ? 'Customize Drink' : 'Customize Item'}
-                </Text>
-                <TouchableOpacity onPress={closeCustomizer}>
-                  <Ionicons name="close-circle" size={24} color={Colors.primary.default} />
+              {/* Modal Top Header */}
+              <View style={styles.customizerHeaderRow}>
+                <View style={styles.customizerHeaderLeft}>
+                  <View style={styles.customizerTitleIconCircle}>
+                    <Ionicons name="cafe" size={20} color="#1D5FA7" />
+                  </View>
+                  <View>
+                    <Text style={styles.customizerModalTitle}>
+                      {customizingProduct.categoryId === 'drinks' ? 'Customize Drink' : 'Customize Item'}
+                    </Text>
+                    <Text style={styles.customizerModalSubtitle}>Make it yours, enjoy it your way.</Text>
+                  </View>
+                </View>
+                
+                <TouchableOpacity onPress={closeCustomizer} style={styles.customizerCloseBtn} activeOpacity={0.8}>
+                  <Ionicons name="close" size={18} color="#64748B" />
                 </TouchableOpacity>
               </View>
 
-              <ScrollView contentContainerStyle={styles.modalScrollBody} showsVerticalScrollIndicator={false}>
-                <Image source={{ uri: customizingProduct.image }} style={styles.customizerImg} />
-                <Text style={styles.customizerName}>{customizingProduct.name}</Text>
-                <Text style={styles.customizerDesc}>{customizingProduct.description}</Text>
+              <ScrollView contentContainerStyle={styles.customizerScrollContent} showsVerticalScrollIndicator={false}>
+                {/* Product Teaser Hero Card */}
+                <View style={styles.customizerHeroCard}>
+                  {/* Left Product Image */}
+                  <View style={styles.customizerHeroImgContainer}>
+                    <Image source={{ uri: customizingProduct.image }} style={styles.customizerHeroImg} resizeMode="cover" />
+                    <View style={styles.customizerRatingBadge}>
+                      <Ionicons name="star" size={10} color="#F59E0B" style={{ marginRight: 2 }} />
+                      <Text style={styles.customizerRatingText}>{customizingProduct.rating || '4.8'}</Text>
+                    </View>
+                  </View>
 
-                {/* Dynamic Customization Fields */}
+                  {/* Right Product Details */}
+                  <View style={styles.customizerHeroDetails}>
+                    <View style={styles.customizerPraiseTag}>
+                      <Ionicons name="star" size={9} color="#2563EB" style={{ marginRight: 3 }} />
+                      <Text style={styles.customizerPraiseTagText}>CLASSIC FAVORITE</Text>
+                    </View>
+
+                    <Text style={styles.customizerHeroTitle} numberOfLines={1}>{customizingProduct.name}</Text>
+
+                    {/* Roast / Bean Strength Indicators */}
+                    <View style={styles.customizerBeansRow}>
+                      {Array.from({ length: 5 }).map((_, bIdx) => (
+                        <Ionicons 
+                          key={bIdx} 
+                          name="cafe" 
+                          size={12} 
+                          color={bIdx < 4 ? "#78350F" : "#CBD5E1"} 
+                          style={{ marginRight: 3 }} 
+                        />
+                      ))}
+                    </View>
+
+                    <Text style={styles.customizerHeroDesc} numberOfLines={3}>
+                      {customizingProduct.description || 'Rich espresso combined with steamed milk and a deep layer of thick foam.'}
+                    </Text>
+
+                    {/* Info Pill */}
+                    <View style={styles.customizerInfoPillRow}>
+                      <View style={styles.customizerInfoPill}>
+                        <Ionicons name="flame" size={10} color="#EF4444" style={{ marginRight: 3 }} />
+                        <Text style={styles.customizerInfoPillText}>120 kcal</Text>
+                        <Text style={styles.customizerInfoDivider}>|</Text>
+                        <Ionicons name="cafe" size={10} color="#1D5FA7" style={{ marginRight: 3 }} />
+                        <Text style={styles.customizerInfoPillText}>Medium Strength</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Dynamic Option Groups */}
                 {productCustomConfig && Object.entries(productCustomConfig.customizations || productCustomConfig).map(([fieldName, fieldConfig]: [string, any]) => {
                   if (!fieldConfig || typeof fieldConfig !== 'object' || !fieldConfig.options) return null;
 
                   const isMultiSelect = fieldConfig.isMultiSelect;
                   const selections = customSelections[fieldName] || [];
                   const label = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+                  const lowerName = fieldName.toLowerCase();
+
+                  // Group header icon
+                  let groupIcon = "options-outline";
+                  let groupSub = `Choose your ${lowerName}`;
+                  if (lowerName.includes('milk')) {
+                    groupIcon = "nutrition-outline";
+                    groupSub = "Choose your preferred milk";
+                  } else if (lowerName.includes('size')) {
+                    groupIcon = "cafe-outline";
+                    groupSub = "Choose your size";
+                  } else if (lowerName.includes('sweet')) {
+                    groupIcon = "cube-outline";
+                    groupSub = "Select sweetness level";
+                  } else if (lowerName.includes('addon')) {
+                    groupIcon = "sparkles-outline";
+                    groupSub = "Add extra toppings";
+                  }
 
                   return (
-                    <View key={fieldName} style={{ marginBottom: 16 }}>
-                      <Text style={styles.customLabel}>{label}</Text>
-                      {isMultiSelect ? (
-                        /* Multi Select layout (similar to add-ons grid) */
-                        <View style={styles.customAddonGrid}>
-                          {fieldConfig.options.map((opt: any) => {
-                            const isChecked = selections.includes(opt.name);
-                            return (
-                              <TouchableOpacity
-                                key={opt.name}
-                                style={[styles.addonCard, isChecked && styles.addonCardActive]}
-                                onPress={() => {
+                    <View key={fieldName} style={styles.customizerOptionGroupCard}>
+                      {/* Group Header */}
+                      <View style={styles.customizerGroupHeader}>
+                        <View style={styles.customizerGroupIconCircle}>
+                          <Ionicons name={groupIcon as any} size={16} color="#1D5FA7" />
+                        </View>
+                        <View>
+                          <Text style={styles.customizerGroupTitle}>{label}</Text>
+                          <Text style={styles.customizerGroupSubtitle}>{groupSub}</Text>
+                        </View>
+                      </View>
+
+                      {/* Selectable Options Row / Grid */}
+                      <View style={styles.customizerOptionsContainer}>
+                        {fieldConfig.options.map((opt: any) => {
+                          const isChecked = selections.includes(opt.name);
+
+                          // Sublabel for size (e.g. 12 oz, 16 oz)
+                          let subSizeText = "";
+                          if (lowerName.includes('size')) {
+                            if (opt.name.toLowerCase().includes('regular')) subSizeText = "12 oz";
+                            else if (opt.name.toLowerCase().includes('medium')) subSizeText = "16 oz";
+                            else if (opt.name.toLowerCase().includes('large')) subSizeText = "20 oz";
+                          }
+
+                          return (
+                            <TouchableOpacity
+                              key={opt.name}
+                              style={[
+                                styles.customizerSelectCard,
+                                isChecked && styles.customizerSelectCardActive
+                              ]}
+                              activeOpacity={0.8}
+                              onPress={() => {
+                                if (isMultiSelect) {
                                   let newSels = [...selections];
-                                  if (isChecked) {
-                                    newSels = newSels.filter(s => s !== opt.name);
-                                  } else {
-                                    newSels.push(opt.name);
-                                  }
-                                  setCustomSelections({
-                                    ...customSelections,
-                                    [fieldName]: newSels
-                                  });
-                                  // Update backward compatible state if fieldName is 'addons'
-                                  if (fieldName.toLowerCase() === 'addons') {
-                                    setCustomAddons(newSels);
-                                  }
-                                }}
-                              >
-                                <Ionicons
-                                  name={isChecked ? 'checkmark-circle' : 'add-circle-outline'}
-                                  size={16}
-                                  color={isChecked ? '#FAF9F5' : Colors.primary.default}
-                                  style={{ marginRight: 6 }}
+                                  if (isChecked) newSels = newSels.filter(s => s !== opt.name);
+                                  else newSels.push(opt.name);
+                                  setCustomSelections({ ...customSelections, [fieldName]: newSels });
+                                  if (lowerName === 'addons') setCustomAddons(newSels);
+                                } else {
+                                  setCustomSelections({ ...customSelections, [fieldName]: [opt.name] });
+                                  if (lowerName === 'size' || lowerName === 'sizes') setCustomSize(opt.name);
+                                  else if (lowerName === 'sweetness') setCustomSweetness(opt.name);
+                                  else if (lowerName === 'milk') setCustomMilk(opt.name);
+                                }
+                              }}
+                            >
+                              {/* Selected Checkmark Badge */}
+                              {isChecked && (
+                                <View style={styles.customizerCheckBadge}>
+                                  <Ionicons name="checkmark" size={10} color="#FFFFFF" />
+                                </View>
+                              )}
+
+                              {/* Option Icon (if applicable) */}
+                              {lowerName.includes('milk') && (
+                                <Ionicons 
+                                  name={opt.name.toLowerCase().includes('cream') ? "water-outline" : (opt.name.toLowerCase().includes('oat') ? "leaf-outline" : "cube-outline")} 
+                                  size={18} 
+                                  color={isChecked ? "#2563EB" : "#64748B"} 
+                                  style={{ marginBottom: 4 }}
                                 />
-                                <Text style={[styles.addonText, isChecked && styles.addonTextActive]}>
-                                  {opt.name} {opt.price > 0 ? `(+₱${opt.price})` : ''}
+                              )}
+
+                              <Text style={[styles.customizerSelectText, isChecked && styles.customizerSelectTextActive]}>
+                                {opt.label || opt.name} {opt.price > 0 ? `(+₱${opt.price})` : ''}
+                              </Text>
+
+                              {subSizeText !== "" && (
+                                <Text style={[styles.customizerSubSizeText, isChecked && styles.customizerSubSizeTextActive]}>
+                                  {subSizeText}
                                 </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      ) : (
-                        /* Single Select layout (similar to size/sweetness row) */
-                        <View style={styles.customOptionRow}>
-                          {fieldConfig.options.map((opt: any) => {
-                            const isChecked = selections.includes(opt.name);
-                            return (
-                              <TouchableOpacity
-                                key={opt.name}
-                                style={[styles.customOptionBtn, isChecked && styles.customOptionBtnActive]}
-                                onPress={() => {
-                                  setCustomSelections({
-                                    ...customSelections,
-                                    [fieldName]: [opt.name]
-                                  });
-                                  // Update backward compatible states
-                                  const lowerName = fieldName.toLowerCase();
-                                  if (lowerName === 'size' || lowerName === 'sizes') {
-                                    setCustomSize(opt.name);
-                                  } else if (lowerName === 'sweetness') {
-                                    setCustomSweetness(opt.name);
-                                  } else if (lowerName === 'milk') {
-                                    setCustomMilk(opt.name);
-                                  }
-                                }}
-                              >
-                                <Text style={[styles.customOptionText, isChecked && styles.customOptionTextActive]}>
-                                  {opt.label || opt.name} {opt.price > 0 ? `(+₱${opt.price})` : ''}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      )}
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
                     </View>
                   );
                 })}
+
+                {/* Cloud Banner */}
+                <View style={styles.customizerCloudBanner}>
+                  <Image source={require('../../../assets/app/logo.png')} style={styles.customizerCloudBannerImg} resizeMode="contain" />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.customizerCloudBannerTitle}>Customization makes it perfect!</Text>
+                    <Text style={styles.customizerCloudBannerSubtitle}>You're one step closer to your perfect cup.</Text>
+                  </View>
+                  <Ionicons name="sparkles" size={16} color="#3B82F6" />
+                </View>
               </ScrollView>
 
-              <View style={styles.modalFooter}>
-                <Button
-                  title="Add to Cart"
-                  variant="primary"
-                  onPress={(e) => handleConfirmCustomization(e)}
-                  style={styles.modalActionBtn}
-                />
+              {/* Modal Footer Controls */}
+              <View style={styles.customizerFooter}>
+                <View style={styles.customizerFooterTopRow}>
+                  {/* Quantity Counter */}
+                  <View style={styles.customizerQtyContainer}>
+                    <TouchableOpacity 
+                      style={styles.customizerQtyBtn}
+                      onPress={() => setCustomizerQty(prev => Math.max(1, prev - 1))}
+                    >
+                      <Ionicons name="remove" size={14} color="#334155" />
+                    </TouchableOpacity>
+                    
+                    <Text style={styles.customizerQtyVal}>{customizerQty}</Text>
+                    
+                    <TouchableOpacity 
+                      style={styles.customizerQtyBtn}
+                      onPress={() => setCustomizerQty(prev => prev + 1)}
+                    >
+                      <Ionicons name="add" size={14} color="#334155" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Calculated Price */}
+                  <Text style={styles.customizerPriceText}>
+                    ₱{(calculatedCustomPrice * customizerQty).toFixed(2)}
+                  </Text>
+                </View>
+
+                {/* Action Buttons Row */}
+                <View style={styles.customizerActionRow}>
+                  <TouchableOpacity 
+                    style={styles.customizerAddToCartBtn} 
+                    activeOpacity={0.85}
+                    onPress={(e) => handleConfirmCustomization(e)}
+                  >
+                    <Ionicons name="cart-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                    <Text style={styles.customizerAddToCartText}>Add to Cart</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.customizerWishlistBtn} activeOpacity={0.85}>
+                    <Ionicons name="heart-outline" size={20} color="#64748B" />
+                  </TouchableOpacity>
+                </View>
               </View>
             </Animated.View>
           </View>
@@ -2141,12 +2489,12 @@ export default function Home() {
         </View>
       )}
 
-      {/* SEND A LESH GIFT MODAL */}
+      {/* SEND A FOAM GIFT MODAL */}
       {showGiftModal && (
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContentSmall, { opacity: giftOpacity, transform: [{ scale: giftScale }] }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Send a Lesh Gift</Text>
+              <Text style={styles.modalTitle}>Send a Foam Gift</Text>
               <TouchableOpacity onPress={closeGift}>
                 <Ionicons name="close-circle" size={24} color={Colors.primary.default} />
               </TouchableOpacity>
@@ -2228,71 +2576,151 @@ export default function Home() {
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContentSmall, { opacity: voucherOpacity, transform: [{ scale: voucherScale }] }]}>
             <View style={styles.voucherPopupHeader2}>
-              <Ionicons name="gift" size={36} color={Colors.secondary.default} />
-              <Text style={styles.voucherPopupTitle2}>
-                {unclaimedVouchers.length === 1 ? 'Claim Your Voucher! 🎟️' : `${unclaimedVouchers.length} Vouchers Available!`}
-              </Text>
+              <Image 
+                source={require('../../../assets/app/logo.png')} 
+                style={{ width: 44, height: 44, marginRight: 12 }} 
+                resizeMode="contain" 
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.voucherPopupTitle2, { textAlign: 'left', marginTop: 0 }]}>
+                  {unclaimedVouchers.length === 1 ? 'Claim Your Voucher! 🎟️' : `${unclaimedVouchers.length} Vouchers Available!`}
+                </Text>
+                <Text style={{ fontFamily: 'Poppins', fontSize: 10.5, color: Colors.neutral.gray500, marginTop: 1 }}>
+                  Tap claim to add these to your account!
+                </Text>
+              </View>
             </View>
 
             {/* Voucher Cards */}
             <ScrollView style={{ maxHeight: 320, paddingHorizontal: 16 }} showsVerticalScrollIndicator={false}>
               {unclaimedVouchers.map((voucher: any, idx: number) => {
-                const cardColors = [Colors.secondary.default, '#5B8A72', '#C67B5C', '#6B5CA5'];
+                const cardColors = [Colors.primary.default, '#4299E1', '#3182CE', '#1B4D86'];
                 const bgColor = cardColors[idx % cardColors.length];
                 const isClaimed = dummyData.vouchers.some((v: any) => v.code === voucher.code);
 
                 return (
-                  <View key={voucher.id} style={styles.ticketCard}>
-                    {/* Ticket Left (main content) */}
-                    <View style={[styles.ticketLeft, { backgroundColor: bgColor }]}>
-                      {/* Claimed Badge */}
-                      {isClaimed && (
-                        <View style={styles.ticketClaimedBadge}>
-                          <Ionicons name="checkmark-circle" size={10} color="#FFF" />
-                          <Text style={styles.ticketClaimedText}> Claimed</Text>
+                  <View key={voucher.id} style={styles.ticketCardPopup}>
+                    {/* Physical Ticket Edge Cutouts (Punched Holes) */}
+                    <View style={styles.topCenterCutoutPopup} />
+                    <View style={styles.bottomCenterCutoutPopup} />
+                    <View style={styles.leftEdgeCutoutPopup} />
+                    <View style={styles.rightEdgeCutoutPopup} />
+
+                    {/* LEFT TICKET (Main Body - Cream base) */}
+                    <View style={styles.leftTicketPopup}>
+                      {/* Top Left Brand Logo */}
+                      <View style={styles.logoBlockPopup}>
+                        <Image 
+                          source={require('../../../assets/app/logo.png')} 
+                          style={styles.logoImgPopup} 
+                          resizeMode="contain" 
+                        />
+                        <View style={styles.logoDividerPopup} />
+                        <View style={styles.logoTextContainerPopup}>
+                          <Text style={styles.logoTitlePopup}>fōam</Text>
+                          <Text style={styles.logoSubtitlePopup}>coffee</Text>
                         </View>
-                      )}
-                      <Text style={styles.ticketLabel} numberOfLines={2}>{voucher.label}</Text>
-                      <Text style={styles.ticketDiscount}>
-                        {voucher.type === 'percent' ? `${(voucher.discount * 100).toFixed(0)}% OFF` : `₱${Number(voucher.discount).toFixed(0)} OFF`}
-                      </Text>
-                      <View style={styles.ticketCodePill}>
-                        <Text style={styles.ticketCodeText}>{voucher.code}</Text>
                       </View>
-                    </View>
 
-                    {/* Perforated divider */}
-                    <View style={[styles.ticketDivider, { backgroundColor: bgColor }]}>
-                      <View style={[styles.ticketNotchTop, { backgroundColor: '#FAF9F5' }]} />
-                      <View style={styles.ticketDashedLine}>
-                        {Array.from({ length: 8 }).map((_, i) => (
-                          <View
-                            key={i}
-                            style={{ width: 2, height: 6, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 1, marginVertical: 2 }}
-                          />
-                        ))}
+                      {/* Sparkle details */}
+                      <Ionicons name="sparkles" size={10} color="#82C1F9" style={styles.sparkleDecorationPopup} />
+
+                      {/* Center Content */}
+                      <View style={styles.centerTextContainerPopup}>
+                        <Text style={styles.voucherMainTitlePopup} numberOfLines={1}>
+                          {voucher.label.toUpperCase()}
+                        </Text>
+                        
+                        <View style={styles.dividerRowPopup}>
+                          <View style={styles.dividerLinePopup} />
+                          <Ionicons name="heart" size={8} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+                          <View style={styles.dividerLinePopup} />
+                        </View>
+                        
+                        <Text style={styles.voucherSubtitlePopup} numberOfLines={1}>
+                          VALID ON ALL FOAM COFFEE DRINKS
+                        </Text>
                       </View>
-                      <View style={[styles.ticketNotchBottom, { backgroundColor: '#FAF9F5' }]} />
-                    </View>
 
-                    {/* Ticket Right (action) */}
-                    <View style={[styles.ticketRight, { backgroundColor: bgColor }]}>
-                    {isClaimed && (
-                        <Ionicons name="checkmark-circle" size={24} color="rgba(255,255,255,0.8)" />
-                      )}
-                      {!isClaimed && (
-                        <TouchableOpacity
-                          style={[styles.ticketClaimBtn, claimingVoucherId === voucher.id && { opacity: 0.5 }]}
-                          onPress={() => handleClaimVoucher(voucher.id)}
-                          disabled={claimingVoucherId === voucher.id}
-                          activeOpacity={0.8}
-                        >
-                          <Ionicons name="ticket-outline" size={16} color={bgColor} />
-                          <Text style={[styles.ticketClaimBtnText, { color: bgColor }]}>
-                            {claimingVoucherId === voucher.id ? '...' : 'Claim'}
+                      {/* Bottom Row Details */}
+                      <View style={styles.bottomDetailsRowPopup}>
+                        {/* Value Badge */}
+                        <View style={styles.valueRowPopup}>
+                          <View style={styles.valueTagPopup}>
+                            <Text style={styles.valueTagTextPopup}>VALUE</Text>
+                          </View>
+                          <Text style={styles.valueAmountTextPopup}>
+                            {voucher.type === 'percent' ? `${(voucher.discount * 100).toFixed(0)}%` : `₱${Number(voucher.discount).toFixed(0)}`}
                           </Text>
-                        </TouchableOpacity>
-                      )}
+                        </View>
+
+                        <View style={styles.bottomRowDividerPopup} />
+
+                        {/* Support message */}
+                        <View style={styles.supportContainerPopup}>
+                          <Ionicons name="cafe" size={12} color="#3D2B1F" style={{ marginRight: 4 }} />
+                          <View>
+                            <Text style={styles.supportTextPopup}>THANK YOU</Text>
+                            <Text style={styles.supportTextPopup}>FOR CHOOSING FOAM COFFEE!</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Bottom Ribbon */}
+                      <View style={styles.bottomRibbonPopup}>
+                        <Text style={styles.bottomRibbonTextPopup}>❤ MADE WITH PASSION ❤</Text>
+                      </View>
+                    </View>
+
+                    {/* Perforated vertical line */}
+                    <View style={styles.perforatedDividerPopup} />
+
+                    {/* RIGHT STUB (Tear-off Ticket - Sky Blue) */}
+                    <View style={styles.rightTicketStubPopup}>
+                      {/* Stub Header */}
+                      <View style={styles.stubHeaderPopup}>
+                        <Text style={styles.stubHeaderLabelPopup}>★ ENJOY ★</Text>
+                        <Text style={styles.stubHeaderSubtitlePopup}>Your Coffee!</Text>
+                      </View>
+
+                      {/* Circular Mascot Emblem with dashed border */}
+                      <View style={styles.stubMascotEmblemPopup}>
+                        <View style={styles.stubMascotCirclePopup}>
+                          <Image 
+                            source={require('../../../assets/app/logo.png')} 
+                            style={styles.stubMascotImgPopup} 
+                            resizeMode="contain" 
+                          />
+                        </View>
+                      </View>
+
+                      {/* Expiry Details */}
+                      <View style={styles.stubExpiryBlockPopup}>
+                        <Text style={styles.stubExpiryLabelPopup}>VALID UNTIL</Text>
+                        <Text style={styles.stubExpiryValuePopup}>12 / 31 / 2025</Text>
+                      </View>
+
+                      {/* Claim Action Button (Pill shape bottom) */}
+                      <View style={styles.stubActionBlockPopup}>
+                        <Text style={styles.stubCodeLabelPopup}>ACTION</Text>
+                        {isClaimed ? (
+                          <View style={styles.stubCodePillPopupClaimed}>
+                            <Ionicons name="checkmark-circle" size={10} color="#FAF9F5" style={{ marginRight: 2 }} />
+                            <Text style={[styles.stubCodePillTextPopup, { color: '#FAF9F5' }]}>CLAIMED</Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity 
+                            style={styles.stubCodePillPopup} 
+                            onPress={() => handleClaimVoucher(voucher.id)}
+                            disabled={claimingVoucherId === voucher.id}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.stubCodePillTextPopup}>
+                              {claimingVoucherId === voucher.id ? '...' : 'CLAIM'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
                   </View>
                 );
@@ -2369,10 +2797,13 @@ export default function Home() {
           subscriptionBalance={subscriptionBalance}
           cartTotal={cartTotal}
           grandTotal={grandTotal}
+          deliveryFee={deliveryFee}
           subscriptionDiscount={subscriptionDiscount}
           voucherDiscount={voucherDiscount}
           perkDiscount={perkDiscount}
           perksApplied={perksApplied}
+          subscriptionName={cartComputed.subscription_name || null}
+          serverVouchers={cartComputed.applied_vouchers || []}
           appliedVouchers={appliedVouchers}
           setAppliedVouchers={setAppliedVouchers}
           voucherCode={voucherCode}
@@ -2496,7 +2927,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notificationIconBtn: {
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     width: 38,
     height: 38,
     borderRadius: 19,
@@ -2505,7 +2936,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   cartIconBtn: {
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     width: 38,
     height: 38,
     borderRadius: 19,
@@ -2581,212 +3012,412 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   loyaltyTeaserCard: {
-    flexDirection: 'row',
-    backgroundColor: Colors.primary.default,
+    backgroundColor: '#E8F2FA', // light blue background
     borderRadius: 20,
+        marginBottom: 20,
+overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#D0E3F3',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  loyaltyBgWaveLight: {
+    position: 'absolute',
+    bottom: -60,
+    left: -20,
+    right: -20,
+    height: 140,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 50,
+    borderTopRightRadius: 40,
+  },
+  loyaltyBgWaveDark: {
+    position: 'absolute',
+    bottom: 25,
+    left: -30,
+    right: -30,
+    height: 100,
+    backgroundColor: '#D1E5F7',
+    borderTopLeftRadius: 60,
+    borderTopRightRadius: 80,
+    opacity: 0.6,
+  },
+  loyaltyTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     padding: 16,
-    marginBottom: 20,
+    paddingBottom: 8,
+    zIndex: 1,
+  },
+  loyaltyLogoContainer: {
+    width: 80,
+    height: 80,
+    marginRight: 12,
+    position: 'relative',
+    marginTop: -8,
+  },
+  loyaltyCloudImg: {
+    width: '100%',
+    height: '100%',
+  },
+  loyaltySparkle1: {
+    position: 'absolute',
+    top: 6,
+    left: 4,
+  },
+  loyaltySparkle2: {
+    position: 'absolute',
+    top: 20,
+    right: 0,
+  },
+  loyaltyCenterText: {
+    flex: 1, },
+    loyaltyPointsHeaderRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  loyaltyTeaserLeft: {
-    flex: 1,
-    paddingRight: 10,
+  loyaltyTitleText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 11,
+    color: '#1D5FA7',
   },
-  loyaltyTeaserTitle: {
+  loyaltyPointsValRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: -6,
+  },
+  loyaltyPointsBigText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 42,
+    color: '#1D5FA7',
+    lineHeight: 50,
+  },
+  loyaltyPointsLabelText: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: 13,
-    color: '#FAF9F5',
-    opacity: 0.8,
+    color: '#1D5FA7',
+    marginLeft: 4,
   },
-  loyaltyTeaserPoints: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 26,
-    color: '#FAF9F5',
-    marginVertical: 2,
+  loyaltyPraiseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1E5F7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: -4,
   },
-  pointsLabel: {
-    fontFamily: 'Poppins',
-    fontSize: 14,
-    opacity: 0.8,
+  loyaltyPraiseText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 9,
+    color: '#1D5FA7',
   },
-  loyaltyMiniProgressBg: {
-    width: '90%',
-    height: 4,
-    backgroundColor: 'rgba(250, 249, 245, 0.2)',
-    borderRadius: 2,
-    marginVertical: 8,
-  },
-  loyaltyMiniProgressFill: {
-    height: '100%',
-    backgroundColor: Colors.secondary.default,
-    borderRadius: 2,
-  },
-  loyaltyProgressText: {
-    fontFamily: 'Poppins',
-    fontSize: 10,
-    color: '#FAF9F5',
-    opacity: 0.75,
-  },
-  loyaltyTeaserRight: {
+  loyaltyViewStampsBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(250, 249, 245, 0.15)',
-    paddingLeft: 16,
-    width: 90,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  viewStampsText: {
+  loyaltyViewStampsBtnText: {
     fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#1D5FA7',
+    lineHeight: 11,
+  },
+  loyaltyProgressSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  loyaltyProgressLeftCol: {
+    flex: 1,
+    marginRight: 12,
+  },
+  loyaltyCupsList: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  loyaltyCupsTargetBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  loyaltyCupsTargetBadgeVal: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 15,
+    color: '#1D5FA7',
+    lineHeight: 18,
+  },
+  loyaltyCupsTargetBadgeLabel: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 9,
+    color: '#718096',
+    lineHeight: 10,
+  },
+  loyaltyProgressLineBg: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    width: '100%',
+    position: 'relative',
+  },
+  loyaltyProgressLineFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#3182CE',
+    borderRadius: 4,
+  },
+  loyaltyProgressLineDot: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#1D5FA7',
+    top: -3,
+    marginLeft: -7,
+  },
+  loyaltyBottomRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    zIndex: 1,
+  },
+  loyaltyProgressCupsText: {
+    fontFamily: 'Poppins',
     fontSize: 10,
-    color: '#FAF9F5',
-    marginTop: 4,
-    textAlign: 'center',
+    color: '#4A5568',
+    marginBottom: 8,
   },
   promoSection: {
     marginBottom: 20,
   },
   promoScroll: {
+    paddingRight: 16,
     paddingBottom: 8,
   },
-  promoCardContainer: {
-    width: 310,
-    height: 132,
-    borderRadius: 20,
+  promoCardWrapper: {
+    height: 160,
+    borderRadius: 22,
     marginRight: 14,
-    flexDirection: 'row',
     overflow: 'hidden',
     position: 'relative',
-    shadowColor: '#4A3525',
+    flexDirection: 'row',
+  },
+  promoCardBlue: {
+    width: 290,
+    backgroundColor: '#3B82F6',
+    shadowColor: '#2563EB',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
+    elevation: 4,
+  },
+  promoCardPeach: {
+    width: 290,
+    backgroundColor: '#FDE4D0',
+    shadowColor: '#EA580C',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
     elevation: 3,
   },
-  promoCardLeft: {
-    flex: 1.3,
-    padding: 16,
-    justifyContent: 'space-between',
-  },
-  promoCardHeading: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 22,
-    color: '#FFF',
-    lineHeight: 26,
-  },
-  promoCardSubheading: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 12,
-    color: '#FFF',
-    marginTop: 2,
-    opacity: 0.9,
-  },
-  promoCardActionRow: {
-    marginTop: 8,
-  },
-  promoPill: {
-    flexDirection: 'row',
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#FFF',
-    height: 26,
-  },
-  promoPillLabel: {
-    backgroundColor: '#FFF',
-    paddingHorizontal: 6,
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#E0E0E0',
-  },
-  promoPillLabelText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 7.5,
-    color: Colors.secondary.default,
-    textTransform: 'uppercase',
-  },
-  promoPillValue: {
-    backgroundColor: '#FFF',
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-  },
-  promoPillValueText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 10,
-    color: '#333',
-    letterSpacing: 0.5,
-  },
-  promoPillButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E1E1E',
-    borderRadius: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    alignSelf: 'flex-start',
-    height: 26,
-  },
-  promoPillBtnText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 10,
-    color: '#FFF',
-  },
-  promoCardFootnote: {
-    fontFamily: 'Poppins',
-    fontSize: 8,
-    color: 'rgba(255, 255, 255, 0.65)',
-    marginTop: 2,
-  },
-  promoCardRight: {
-    flex: 1.1,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  promoImageBgShape: {
+  promoBlueRaysContainer: {
     position: 'absolute',
-    top: -10,
-    bottom: -10,
-    left: 16,
-    right: -20,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    borderTopLeftRadius: 36,
-    borderBottomLeftRadius: 36,
-    transform: [{ rotate: '-8deg' }],
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    opacity: 0.15,
   },
-  promoProductImage: {
-    width: 84,
-    height: 84,
-    borderRadius: 14,
+  promoBlueRay1: {
+    position: 'absolute',
+    width: 200,
+    height: 4,
+    backgroundColor: '#FFFFFF',
+    transform: [{ rotate: '45deg' }],
+    top: -20,
+    right: -40,
+  },
+  promoBlueRay2: {
+    position: 'absolute',
+    width: 200,
+    height: 4,
+    backgroundColor: '#FFFFFF',
+    transform: [{ rotate: '25deg' }],
+    top: 40,
+    right: -20,
+  },
+  promoBlueRay3: {
+    position: 'absolute',
+    width: 200,
+    height: 4,
+    backgroundColor: '#FFFFFF',
+    transform: [{ rotate: '-15deg' }],
+    top: 100,
+    right: -10,
+  },
+  promoCardContentInner: {
+    flex: 1,
+    padding: 14,
+    justifyContent: 'space-between',
     zIndex: 2,
   },
-  promoFloatBadge: {
-    position: 'absolute',
-    bottom: 12,
-    left: 136,
-    zIndex: 10,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 10,
-    paddingVertical: 3,
+  promoTopBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
     paddingHorizontal: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 3,
+    paddingVertical: 3,
+    borderRadius: 12,
   },
-  promoFloatBadgeText: {
+  promoTopBadgeBlue: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  promoTopBadgePeach: {
+    backgroundColor: 'rgba(210, 84, 0, 0.12)',
+  },
+  promoTopBadgeText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 9,
+    marginLeft: 3,
+  },
+  promoTopBadgeTextBlue: {
+    color: '#FFFFFF',
+  },
+  promoTopBadgeTextPeach: {
+    color: '#D25400',
+  },
+  promoLargeHeading: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 8.5,
-    color: '#FFF',
-    letterSpacing: 0.3,
+    fontSize: 24,
+    lineHeight: 27,
+    marginTop: 4,
   },
+  promoSubHeading: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+    marginTop: 1,
+    marginBottom: 4,
+  },
+  promoTextWhite: {
+    color: '#FFFFFF',
+  },
+  promoTextDark: {
+    color: '#3B271A',
+  },
+  promoCodeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginBottom: 4,
+  },
+  promoCodeBoxBlue: {
+    borderColor: 'rgba(255, 255, 255, 0.7)',
+  },
+  promoCodeBoxPeach: {
+    borderColor: 'rgba(194, 65, 12, 0.4)',
+  },
+  promoCodeBoxText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    letterSpacing: 0.5,
+  },
+  promoCodeBoxDivider: {
+    width: 1,
+    height: 10,
+    marginHorizontal: 5,
+  },
+  promoCodeBoxDividerBlue: {
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  promoCodeBoxDividerPeach: {
+    backgroundColor: 'rgba(194, 65, 12, 0.4)',
+  },
+  promoCodeBoxVal: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  promoBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  promoTermsText: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 8,
+    opacity: 0.8,
+  },
+  promoDeliveryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  promoDeliveryBadgeText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 8,
+    color: '#FFFFFF',
+    marginLeft: 3,
+  },
+  promoRightImageContainer: {
+    width: 120,
+    height: '100%',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderTopRightRadius: 22,
+    borderBottomRightRadius: 22,
+    borderTopLeftRadius: 65,
+    borderBottomLeftRadius: 65,
+    overflow: 'hidden',
+  },
+  promoLatteImg: {
+    width: '100%',
+    height: '100%',
+  },
+
   categorySection: {
     marginBottom: 24,
   },
-  categorySectionSticky: {
+categorySectionSticky: {
     marginBottom: 10,
   },
   sectionTitleSticky: {
@@ -3170,15 +3801,22 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 68,
+    height: 72,
     backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderTopWidth: 1,
-    borderTopColor: Colors.neutral.gray200,
+    borderTopColor: '#E2E8F0',
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
     zIndex: 10,
     paddingBottom: Platform.OS === 'ios' ? 12 : 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 10,
   },
   navItem: {
     alignItems: 'center',
@@ -3189,10 +3827,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-SemiBold',
     fontSize: 10,
     color: Colors.neutral.gray500,
-    marginTop: 4,
+    marginTop: 2,
   },
   navTextActive: {
     color: Colors.primary.default,
+  },
+  activeNavIndicator: {
+    width: 28,
+    height: 3,
+    backgroundColor: Colors.primary.default,
+    borderRadius: 2,
+    marginTop: 3,
   },
   cartBadge: {
     position: 'absolute',
@@ -3221,6 +3866,357 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
+  },
+  modalContentCustomizer: {
+    width: '92%',
+    maxHeight: '85%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    padding: 18,
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  customizerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  customizerHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  customizerTitleIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  customizerModalTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 17,
+    color: '#1D5FA7',
+    lineHeight: 20,
+  },
+  customizerModalSubtitle: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 10,
+    color: '#64748B',
+  },
+  customizerCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  customizerScrollContent: {
+    paddingBottom: 14,
+  },
+  customizerHeroCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    shadowColor: '#1D5FA7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  customizerHeroImgContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    marginRight: 10,
+  },
+  customizerHeroImg: {
+    width: '100%',
+    height: '100%',
+  },
+  customizerRatingBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  customizerRatingText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#1E293B',
+  },
+  customizerHeroDetails: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  customizerPraiseTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  customizerPraiseTagText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#2563EB',
+    letterSpacing: 0.5,
+  },
+  customizerHeroTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 15,
+    color: '#1E293B',
+    marginTop: 2,
+  },
+  customizerBeansRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
+  },
+  customizerHeroDesc: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 10,
+    color: '#64748B',
+    lineHeight: 13,
+  },
+  customizerInfoPillRow: {
+    marginTop: 4,
+  },
+  customizerInfoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  customizerInfoPillText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 9,
+    color: '#475569',
+  },
+  customizerInfoDivider: {
+    fontSize: 9,
+    color: '#CBD5E1',
+    marginHorizontal: 4,
+  },
+  customizerOptionGroupCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  customizerGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  customizerGroupIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  customizerGroupTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#1E293B',
+    lineHeight: 15,
+  },
+  customizerGroupSubtitle: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 9,
+    color: '#64748B',
+  },
+  customizerOptionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  customizerSelectCard: {
+    minWidth: 70,
+    flexGrow: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  customizerSelectCardActive: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+  },
+  customizerCheckBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 3,
+  },
+  customizerSelectText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 11,
+    color: '#475569',
+  },
+  customizerSelectTextActive: {
+    color: '#2563EB',
+    fontFamily: 'Poppins-Bold',
+  },
+  customizerSubSizeText: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 9,
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  customizerSubSizeTextActive: {
+    color: '#3B82F6',
+  },
+  customizerCloudBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9FF',
+    borderRadius: 16,
+    padding: 10,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#E0F2FE',
+  },
+  customizerCloudBannerImg: {
+    width: 34,
+    height: 34,
+  },
+  customizerCloudBannerTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#1D5FA7',
+  },
+  customizerCloudBannerSubtitle: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 9,
+    color: '#64748B',
+  },
+  customizerFooter: {
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  customizerFooterTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  customizerQtyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 3,
+  },
+  customizerQtyBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  customizerQtyVal: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#1E293B',
+    marginHorizontal: 12,
+  },
+  customizerPriceText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 20,
+    color: '#1E293B',
+  },
+  customizerActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customizerAddToCartBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  customizerAddToCartText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  customizerWishlistBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   modalContent: {
     width: '90%',
@@ -3435,7 +4431,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   upsellArtBg: {
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 24,
@@ -3475,7 +4471,7 @@ const styles = StyleSheet.create({
     width: '45%',
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -3654,7 +4650,7 @@ const styles = StyleSheet.create({
   seeMoreText: {
     fontFamily: 'Poppins-Bold',
     fontSize: 12,
-    color: Colors.secondary.default,
+    color: Colors.primary.default,
   },
   seeMoreBtnWrapper: {
     alignItems: 'center',
@@ -3665,7 +4661,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     borderWidth: 1,
     borderColor: Colors.neutral.gray300,
     borderRadius: 20,
@@ -3916,5 +4912,327 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Bold',
     fontSize: 12,
     color: Colors.primary.default,
+  },
+  voucherSkipBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  voucherSkipText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    color: '#8E8E93',
+  },
+
+  // ─── Welcome Voucher Popup Ticket Styles ───────────────────────────────────────
+  ticketCardPopup: {
+    flexDirection: 'row',
+    width: '100%',
+    height: 170, // Slightly shorter for popup scroll view
+    borderRadius: 12,
+    overflow: 'visible', // Visible overflow so punch holes aren't clipped!
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7',
+    position: 'relative',
+    shadowColor: '#2D78CD',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  topCenterCutoutPopup: {
+    position: 'absolute',
+    top: -7,
+    left: '67.5%',
+    marginLeft: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5', // Blends with modal background to look like cutout
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  bottomCenterCutoutPopup: {
+    position: 'absolute',
+    bottom: -7,
+    left: '67.5%',
+    marginLeft: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5', // Blends with modal background to look like cutout
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  leftEdgeCutoutPopup: {
+    position: 'absolute',
+    top: '50%',
+    left: -7,
+    marginTop: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5', // Blends with modal background to look like cutout
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  rightEdgeCutoutPopup: {
+    position: 'absolute',
+    top: '50%',
+    right: -7,
+    marginTop: -7,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FAF9F5', // Blends with modal background to look like cutout
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+  },
+  leftTicketPopup: {
+    flex: 2.1,
+    backgroundColor: '#FDFBF7',
+    padding: 10,
+    justifyContent: 'space-between',
+    position: 'relative',
+    borderTopLeftRadius: 12, // Match parent corner radius
+    borderBottomLeftRadius: 12,
+  },
+  perforatedDividerPopup: {
+    width: 0.5,
+    height: '100%',
+    borderColor: 'rgba(61, 43, 31, 0.15)',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  rightTicketStubPopup: {
+    flex: 1,
+    backgroundColor: '#82C1F9',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopRightRadius: 12, // Match parent corner radius
+    borderBottomRightRadius: 12,
+  },
+  logoBlockPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoImgPopup: {
+    width: 18,
+    height: 18,
+  },
+  logoDividerPopup: {
+    width: 1,
+    height: 14,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 6,
+    opacity: 0.25,
+  },
+  logoTextContainerPopup: {
+    justifyContent: 'center',
+  },
+  logoTitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9.5,
+    color: '#3D2B1F',
+    lineHeight: 10,
+    letterSpacing: 0.2,
+  },
+  logoSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    lineHeight: 7,
+    marginTop: -1,
+  },
+  sparkleDecorationPopup: {
+    position: 'absolute',
+    top: 18,
+    right: 14,
+  },
+  centerTextContainerPopup: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 2,
+    paddingHorizontal: 6,
+  },
+  voucherMainTitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    color: '#3D2B1F',
+    letterSpacing: 1.5,
+  },
+  dividerRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
+    width: '80%',
+  },
+  dividerLinePopup: {
+    flex: 1,
+    height: 0.8,
+    backgroundColor: '#82C1F9',
+  },
+  voucherSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6,
+    color: '#3D2B1F',
+    letterSpacing: 0.8,
+  },
+  bottomDetailsRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 10,
+  },
+  valueRowPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  valueTagPopup: {
+    backgroundColor: '#82C1F9',
+    paddingVertical: 1.5,
+    paddingHorizontal: 4,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  valueTagTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+  },
+  valueAmountTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    color: '#82C1F9',
+    lineHeight: 14,
+  },
+  bottomRowDividerPopup: {
+    width: 0.8,
+    height: 14,
+    backgroundColor: '#3D2B1F',
+    marginHorizontal: 8,
+    opacity: 0.2,
+  },
+  supportContainerPopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  supportTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.2,
+    color: '#3D2B1F',
+    letterSpacing: 0.1,
+    lineHeight: 6,
+  },
+  bottomRibbonPopup: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 12,
+    backgroundColor: '#E6F3FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderBottomLeftRadius: 10,
+  },
+  bottomRibbonTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 5.2,
+    color: '#82C1F9',
+    letterSpacing: 1.2,
+  },
+  stubHeaderPopup: {
+    alignItems: 'center',
+  },
+  stubHeaderLabelPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  stubHeaderSubtitlePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontStyle: 'italic',
+    fontSize: 8,
+    color: '#FFFFFF',
+  },
+  stubMascotEmblemPopup: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stubMascotCirclePopup: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderStyle: 'dashed',
+  },
+  stubMascotImgPopup: {
+    width: 24,
+    height: 24,
+  },
+  stubExpiryBlockPopup: {
+    alignItems: 'center',
+  },
+  stubExpiryLabelPopup: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+  stubExpiryValuePopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    marginTop: -1,
+  },
+  stubActionBlockPopup: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  stubCodeLabelPopup: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 5.5,
+    color: '#FFFFFF',
+    opacity: 0.8,
+    marginBottom: 2,
+  },
+  stubCodePillPopup: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stubCodePillPopupClaimed: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderRadius: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  stubCodePillTextPopup: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#82C1F9',
+    letterSpacing: 0.5,
   },
 });

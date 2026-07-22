@@ -105,15 +105,15 @@ export default function Welcome() {
 
   return (
     <View style={styles.container}>
+
       {/* Abstract Background Decorative Circles */}
       <Animated.View style={{ opacity: bgFade, position: 'absolute', width: '100%', height: '100%' }}>
-        <View style={[styles.circle, styles.circle1]} />
         <View style={[styles.circle, styles.circle2]} />
-        <View style={[styles.circle, styles.circle3]} />
       </Animated.View>
 
       {/* Coffee Cup and beans Image */}
       <Animated.View style={[styles.imageContainer, { opacity: imageFade, transform: [{ translateY: imageTranslateY }] }]}>
+
 
         <VideoView
           style={styles.image}
@@ -147,9 +147,15 @@ export default function Welcome() {
         />
       </Animated.View>
 
+      {/* Abstract Background Decorative Circles */}
+      <Animated.View style={{ opacity: bgFade, position: 'absolute', width: '100%', height: '100%' }}>
+        <View style={[styles.circle, styles.circle3]} />
+        <View style={[styles.circle, styles.circle1]} />
+      </Animated.View>
+
       {/* Hero Text */}
       <Animated.View style={[styles.textContainer, { opacity: textFade, transform: [{ translateY: textTranslateY }] }]}>
-        <Text style={styles.title}>Welcome to{"\n"}Lesh Kaffe & Pasalubong!</Text>
+        <Text style={styles.title}>Welcome to{"\n"}Foam Coffee!</Text>
         <Text style={styles.subtitle}>
           Where quality meets every sip. Elevating coffee excellence. One cup at a time.
         </Text>
@@ -181,28 +187,29 @@ const styles = StyleSheet.create({
   // Background decorative circles
   circle: {
     position: 'absolute',
-    backgroundColor: '#F3F0E6', // Slightly darker soft warm beige
+    backgroundColor: '#E1EEFA', // Soft cloud blue to match brand theme
     borderRadius: 999,
   },
   circle1: {
-    width: 320,
-    height: 320,
-    top: -60,
-    left: -80,
+    width: 220,
+    height: 220,
+    top: -120,
+    left: -120,
+    opacity: 0.2,
   },
   circle2: {
     width: 380,
     height: 380,
     bottom: -60,
     right: -100,
-    opacity: 0.8,
+    opacity: 0.6,
   },
   circle3: {
-    width: 200,
-    height: 200,
-    top: 180,
+    width: 100,
+    height: 100,
+    top: 280,
     right: -60,
-    opacity: 0.6,
+    opacity: 0.3,
   },
   // Image layout
   imageContainer: {

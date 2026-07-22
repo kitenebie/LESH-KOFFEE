@@ -120,7 +120,7 @@ export async function getLoggedInUser(): Promise<UserSession | null> {
       phone: row.phone || '',
       avatar: row.avatar || '',
       memberLevel: row.memberLevel || 'Bronze',
-      memberLevelLabel: row.memberLevelLabel || 'Lesh Kaffe Bronze Member',
+      memberLevelLabel: row.memberLevelLabel || 'Foam Coffee Bronze Member',
     };
   } catch (error) {
     console.warn('[authSession] getLoggedInUser error:', error);

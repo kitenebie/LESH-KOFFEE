@@ -22,7 +22,6 @@ import SecurityPrivacyView from './SecurityPrivacy';
 
 import { useAppData } from '../../../lib/useAppData';
 import { logout } from '../../../services/authService';
-import { saveCartItems } from '../../../lib/database';
 
 interface ProfileViewProps {
   showAlert: (title: string, message: string, onConfirm?: () => void, hideButton?: boolean, showCancel?: boolean) => void;
@@ -105,7 +104,7 @@ export default function ProfileView({
             />
           ) : null}
           <Text style={styles.profileName}>{dummyData?.user?.name || 'User'}</Text>
-          <Text style={styles.profileLevel}>{dummyData?.user?.memberLevelLabel || 'Lesh Kaffe Member'}</Text>
+          <Text style={styles.profileLevel}>{dummyData?.user?.memberLevelLabel || 'Foam Coffee Member'}</Text>
         </Animated.View>
 
         {/* Settings Group — each item alternates left/right */}
@@ -133,7 +132,8 @@ export default function ProfileView({
                       showAlert('Sign Out', 'Are you sure you want to sign out?', async () => {
                         try {
                           await logout();
-                          await saveCartItems([]);
+                          const { clearAllCache } = await import('../../../lib/database');
+                          await clearAllCache();
                           router.replace('/');
                         } catch (e) {}
                       }, undefined, true);

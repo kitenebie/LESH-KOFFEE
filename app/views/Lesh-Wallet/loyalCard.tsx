@@ -2,11 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import { Colors } from '../../../components/UI/Colors';
+import { useAppData } from '../../../lib/useAppData';
 
 interface LoyalCardProps {
   selectedTier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond';
@@ -27,14 +30,13 @@ export default function LoyalCard({
   leshExp,
   userName,
 }: LoyalCardProps) {
+  const { data: dummyData } = useAppData();
   const [isFlipped, setIsFlipped] = useState(false);
   const flipAnim = useRef(new Animated.Value(0)).current;
 
   // Security Toggles
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [showAccountNo, setShowAccountNo] = useState(false);
-  const [showCvv, setShowCvv] = useState(false);
-  const [showAtmPin, setShowAtmPin] = useState(false);
 
   const handleFlipCard = () => {
     Animated.spring(flipAnim, {
@@ -67,16 +69,14 @@ export default function LoyalCard({
     outputRange: [0, 0, 1, 1],
   });
 
-  const currentTier = tierConfig[selectedTier];
+  const currentTier = tierConfig[selectedTier] || tierConfig.Bronze;
 
-  // Format card number for display (XXXX-XXXX-XXXX-XXXX → XXXX  XXXX  XXXX  XXXX)
-  const formattedCardNumber = leshAcc ? leshAcc.replace(/-/g, '  ') : '••••  ••••  ••••  ••••';
-  const lastFour = leshAcc ? leshAcc.slice(-4) : '••••';
-  const maskedCardNumber = `••••  ••••  ••••  ${lastFour}`;
+  // Dynamic balance reading from context (fallback to 500)
+  const balance = Number(dummyData?.wallet?.balance) || 500;
 
-  // Use actual user data or fallbacks
-  const displayName = userName || 'CARDHOLDER';
-  const displayExp = leshExp || 'MM/YY';
+  // Format card number for display
+  const lastFour = leshAcc ? leshAcc.slice(-6) : '000001';
+  const displayCardNo = showCardNumber ? (leshAcc || 'FC-2024-000001') : `FC-2024-••••${lastFour.slice(-2)}`;
 
   return (
     <View style={styles.outerWrapper}>
@@ -92,143 +92,186 @@ export default function LoyalCard({
 
       <View style={[styles.cardContainer, isLocked && styles.cardContainerLocked]}>
         <View style={styles.cardWrapper}>
-          {/* ATM Front Face */}
+          {/* FRONT FACE (Accurate image clone layout) */}
           <Animated.View 
             style={[
               styles.atmCardFront, 
               { 
                 transform: [{ rotateY: frontInterpolate }], 
                 opacity: frontOpacity,
-                backgroundColor: currentTier.baseColor,
-                borderColor: currentTier.borderColor
               }
             ]}
-            pointerEvents="box-none"
           >
-            {/* Background Flip Target (fills card behind buttons) */}
             <TouchableOpacity 
-              style={styles.cardBgClickTarget} 
+              style={styles.cardContentTouchable} 
               activeOpacity={0.95} 
-              onPress={handleFlipCard} 
-            />
+              onPress={handleFlipCard}
+            >
+              <View style={styles.cardInnerContent}>
+                {/* Top Right Wave Wave graphic */}
+                <View style={styles.topRightWave} pointerEvents="none">
+                  <View style={styles.topRightIconContainer}>
+                    <Ionicons name="cafe-outline" size={110} color="rgba(255, 255, 255, 0.18)" />
+                  </View>
+                </View>
 
-            {/* 3-Color Combination Background Ornaments */}
-            <View style={[styles.cardAccentCircle1, { backgroundColor: currentTier.accent1 }]} pointerEvents="none" />
-            <View style={[styles.cardAccentCircle2, { backgroundColor: currentTier.accent2 }]} pointerEvents="none" />
+                {/* Bottom double layer wave shapes */}
+                <View style={styles.bottomWaveBack} pointerEvents="none" />
+                <View style={styles.bottomWaveFront} pointerEvents="none" />
 
-            {/* Header branding */}
-            <View style={styles.atmHeader} pointerEvents="none">
-              <View style={styles.atmLogoBlock}>
-                <Ionicons name="cafe" size={20} color={currentTier.borderColor} />
-                <Text style={styles.atmBrandName}>LESH KAFFE</Text>
-              </View>
-              <Text style={[styles.atmCardType, { color: currentTier.borderColor }]}>{currentTier.typeName}</Text>
-            </View>
+                {/* Top Left: Logo area (Cloud logo, divider, fōam coffee text) */}
+                <View style={styles.giftCardLogoBlock} pointerEvents="none">
+                  <Image 
+                    source={require('../../../assets/app/logo.png')} 
+                    style={styles.giftCardLogoImg} 
+                    resizeMode="contain" 
+                  />
+                  <View style={styles.giftCardLogoDivider} />
+                  <View style={styles.giftCardLogoTextContainer}>
+                    <Text style={styles.giftCardLogoTitle}>fōam</Text>
+                    <Text style={styles.giftCardLogoSubtitle}>coffee</Text>
+                  </View>
+                </View>
 
-            {/* EMV Microchip & Contactless Wireless Signal */}
-            <View style={styles.chipAndWifiRow} pointerEvents="none">
-              {/* EMV Microchip */}
-              <View style={[styles.emvChip, { backgroundColor: currentTier.borderColor, borderColor: currentTier.accent1 }]}>
-                <View style={styles.chipLineHorizontal} />
-                <View style={styles.chipLineVertical} />
-                <View style={styles.chipCenterCore} />
-              </View>
-              {/* Contactless symbol */}
-              <Ionicons name="cellular" size={18} color="rgba(250, 249, 245, 0.7)" style={styles.contactlessIcon} />
-            </View>
+                {/* Center Right: Mascot large image logo peeking out */}
+                <Image 
+                  source={require('../../../assets/app/logo.png')} 
+                  style={styles.giftCardMascotImg} 
+                  resizeMode="cover" 
+                  pointerEvents="none"
+                />
 
-            {/* 16-Digit ATM Card Number */}
-            <View style={styles.cardNumberRow}>
-              <Text style={styles.atmCardNumber}>
-                {showCardNumber ? formattedCardNumber : maskedCardNumber}
-              </Text>
-              <TouchableOpacity onPress={() => setShowCardNumber(!showCardNumber)} style={styles.eyeBtnFront}>
-                <Ionicons name={showCardNumber ? 'eye-outline' : 'eye-off-outline'} size={16} color={currentTier.borderColor} />
-              </TouchableOpacity>
-            </View>
+                {/* Center Left: GIFT CARD title text & custom quote */}
+                <View style={styles.giftCardTitleContainer} pointerEvents="none">
+                  <Text style={styles.giftCardTitle}>GIFT CARD</Text>
+                  <View style={styles.dividerContainer}>
+                    <View style={styles.dividerLine} />
+                    <Ionicons name="heart" size={8} color="#82C1F9" style={{ marginHorizontal: 6 }} />
+                    <View style={styles.dividerLine} />
+                  </View>
+                  <Text style={styles.giftCardQuote}>GOOD COFFEE. GOOD MOOD.</Text>
+                </View>
 
-            {/* Footer labels, Name, Validity & Overlapping Union circles */}
-            <View style={styles.atmFooter} pointerEvents="none">
-              <View>
-                <Text style={styles.atmLabel}>CARDHOLDER</Text>
-                <Text style={styles.atmValueName}>{displayName.toUpperCase()}</Text>
+                {/* Bottom Row content */}
+                <View style={styles.giftCardBottomRow}>
+                  {/* Bottom Left Support */}
+                  <View style={styles.supportContainer} pointerEvents="none">
+                    <Ionicons name="cafe" size={14} color="#3D2B1F" style={{ marginRight: 6 }} />
+                    <View>
+                      <Text style={styles.supportText}>THANK YOU</Text>
+                      <Text style={styles.supportText}>FOR YOUR SUPPORT!</Text>
+                    </View>
+                  </View>
+                  
+                  {/* Bottom Right Card No */}
+                  <View style={styles.cardNoContainer}>
+                    <Text style={styles.cardNoLabel}>CARD NO.</Text>
+                    <View style={styles.cardNoRow}>
+                      <Text style={styles.cardNoValue}>{displayCardNo}</Text>
+                      <TouchableOpacity 
+                        onPress={() => setShowCardNumber(!showCardNumber)} 
+                        style={styles.eyeBtnMiniFront}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name={showCardNumber ? 'eye-outline' : 'eye-off-outline'} size={11} color="#3D2B1F" style={{ marginLeft: 4 }} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
               </View>
-              <View style={styles.atmExpiryBlock}>
-                <Text style={styles.atmLabel}>GOOD THRU</Text>
-                <Text style={styles.atmValueDate}>{displayExp}</Text>
-              </View>
-              {/* Overlapping 2-Circle Union Design */}
-              <View style={styles.atmUnionBadge}>
-                <View style={[styles.unionCircle, { backgroundColor: '#EB001B' }]} />
-                <View style={[styles.unionCircle, { backgroundColor: '#F79E1B', marginLeft: -8 }]} />
-              </View>
-            </View>
+            </TouchableOpacity>
           </Animated.View>
 
-          {/* ATM Back Face */}
+          {/* BACK FACE (Accurate theme matching) */}
           <Animated.View 
             style={[
               styles.atmCardBack, 
               { 
                 transform: [{ rotateY: backInterpolate }], 
                 opacity: backOpacity,
-                backgroundColor: currentTier.baseColor,
-                borderColor: `${currentTier.borderColor}50`
               }
             ]}
-            pointerEvents="box-none"
           >
-            {/* Background Flip Target (fills card behind buttons) */}
             <TouchableOpacity 
-              style={styles.cardBgClickTarget} 
+              style={styles.cardContentTouchable} 
               activeOpacity={0.95} 
-              onPress={handleFlipCard} 
-            />
+              onPress={handleFlipCard}
+            >
+              <View style={styles.cardInnerContent}>
+                {/* Replicated Waves at the top-right & bottom */}
+                <View style={styles.topRightWave} pointerEvents="none" />
+                <View style={styles.bottomWaveBack} pointerEvents="none" />
+                <View style={styles.bottomWaveFront} pointerEvents="none" />
 
-            {/* 3-Color Combination Background Ornaments */}
-            <View style={[styles.cardAccentCircle1, { backgroundColor: currentTier.accent1 }]} pointerEvents="none" />
-            <View style={[styles.cardAccentCircle2, { backgroundColor: currentTier.accent2 }]} pointerEvents="none" />
+                {/* Back Header */}
+                <View style={styles.backHeader} pointerEvents="none">
+                  <View style={styles.backLogoBlock}>
+                    <Image 
+                      source={require('../../../assets/app/logo.png')} 
+                      style={styles.backLogoImg} 
+                      resizeMode="contain" 
+                    />
+                    <Text style={styles.backBrandText}>FOAM COFFEE</Text>
+                  </View>
+                  <Text style={styles.backCardType}>GIFT CARD BACK</Text>
+                </View>
 
-            {/* Black Magnetic Stripe */}
-            <View style={styles.magneticStripe} pointerEvents="none" />
+                {/* Center Barcode Box */}
+                <View style={styles.backCenterBox}>
+                  <View style={styles.backBarcodeLines} pointerEvents="none">
+                    {[2, 1, 3, 1, 2, 4, 1, 2, 3, 1, 2, 1, 4, 2, 1, 3, 2, 1, 2, 4, 1, 2, 1, 3, 2].map((w, idx) => (
+                      <View 
+                        key={idx} 
+                        style={{
+                          width: w,
+                          height: 34,
+                          backgroundColor: '#3D2B1F', // Espresso brown barcode lines
+                          marginRight: idx % 3 === 0 ? 2 : 1,
+                          opacity: 0.95
+                        }} 
+                      />
+                    ))}
+                  </View>
+                  
+                  {/* Card Code + Visibility toggler in row */}
+                  <View style={styles.backCardCodeRow}>
+                    <Text style={styles.backCardCodeText}>
+                      {showAccountNo ? (leshAcc || 'FC-2024-000001') : `FC-2024-••••${lastFour.slice(-2)}`}
+                    </Text>
+                    <TouchableOpacity 
+                      onPress={() => setShowAccountNo(!showAccountNo)} 
+                      style={styles.eyeBtnMiniBack}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name={showAccountNo ? 'eye-outline' : 'eye-off-outline'} size={12} color="#3D2B1F" style={{ marginLeft: 6 }} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
-            {/* Authorised Signature Strip & 3-digit CVV */}
-            <View style={styles.signatureRow}>
-              <View style={styles.signatureStrip} pointerEvents="none">
-                <Text style={styles.signatureSampleText}>{userName || 'Cardholder'}</Text>
-              </View>
-              <View style={styles.cvvStrip}>
-                <Text style={styles.cvvLabel}>CVV</Text>
-                <View style={styles.cvvValueRow}>
-                  <Text style={styles.cvvValue}>{showCvv ? '843' : '•••'}</Text>
-                  <TouchableOpacity onPress={() => setShowCvv(!showCvv)} style={styles.eyeBtnMini}>
-                    <Ionicons name={showCvv ? 'eye-outline' : 'eye-off-outline'} size={12} color={currentTier.borderColor} />
-                  </TouchableOpacity>
+                {/* Terms and usage instructions */}
+                <View style={styles.backTermsBlock} pointerEvents="none">
+                  <Text style={styles.backTermsText}>
+                    Redeemable for any menu item at any Foam Coffee branch. This card is non-refundable and cannot be exchanged for cash.
+                  </Text>
+                </View>
+
+                {/* Replicated Footer details to match front */}
+                <View style={styles.giftCardBottomRow}>
+                  <View style={styles.supportContainer} pointerEvents="none">
+                    <Ionicons name="cafe" size={14} color="#3D2B1F" style={{ marginRight: 6 }} />
+                    <View>
+                      <Text style={styles.supportText}>THANK YOU</Text>
+                      <Text style={styles.supportText}>FOR YOUR SUPPORT!</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.backScanContainer} pointerEvents="none">
+                    <Ionicons name="scan-outline" size={10} color="#3D2B1F" style={{ marginRight: 4 }} />
+                    <Text style={styles.backScanText}>SCAN BARCODE</Text>
+                  </View>
                 </View>
               </View>
-            </View>
-
-            {/* Secure Credentials list & Terms */}
-            <View style={styles.backCredentialsContainer}>
-              <View style={styles.backCredentialItem}>
-                <Text style={styles.backLabel}>ACCOUNT NO.</Text>
-                <View style={styles.secureValueRow}>
-                  <Text style={styles.backVal}>{showAccountNo ? (leshAcc || '—') : `${lastFour} •••• ••••`}</Text>
-                  <TouchableOpacity onPress={() => setShowAccountNo(!showAccountNo)} style={styles.eyeBtnMini}>
-                    <Ionicons name={showAccountNo ? 'eye-outline' : 'eye-off-outline'} size={14} color={currentTier.borderColor} style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            {/* Back Footer details */}
-            <View style={styles.backAtmFooter} pointerEvents="none">
-              <Text style={styles.backTermsText}>Issued by Lesh Kaffe Inc. Under membership authority.</Text>
-              <View style={styles.backFlipBadge}>
-                <Ionicons name="sync" size={10} color="rgba(250, 249, 245, 0.4)" style={{ marginRight: 4 }} />
-                <Text style={styles.backFlipText}>Flip</Text>
-              </View>
-            </View>
+            </TouchableOpacity>
           </Animated.View>
         </View>
       </View>
@@ -268,25 +311,28 @@ const styles = StyleSheet.create({
     height: '100%',
     position: 'relative',
   },
-  cardBgClickTarget: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1,
+  cardContentTouchable: {
+    width: '100%',
+    height: '100%',
+  },
+  cardInnerContent: {
+    width: '100%',
+    height: '100%',
+    padding: 20,
+    justifyContent: 'space-between',
+    position: 'relative',
   },
   atmCardFront: {
     position: 'absolute',
     width: '100%',
     height: '100%',
     borderRadius: 16,
-    padding: 20,
-    justifyContent: 'space-between',
     borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7', // Premium cream color from logo image
     backfaceVisibility: 'hidden',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 4,
     overflow: 'hidden',
@@ -296,269 +342,283 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 16,
-    paddingVertical: 16,
-    justifyContent: 'space-between',
     borderWidth: 1.5,
+    borderColor: '#E8E5DF',
+    backgroundColor: '#FDFBF7', // Matching cream background
     backfaceVisibility: 'hidden',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 4,
     overflow: 'hidden',
   },
-  cardAccentCircle1: {
+  topRightWave: {
     position: 'absolute',
-    right: -60,
-    bottom: -70,
-    width: 230,
-    height: 230,
-    borderRadius: 115,
-    opacity: 0.45,
-    zIndex: -1,
+    top: -55,
+    right: -25,
+    width: 155,
+    height: 155,
+    borderRadius: 77.5,
+    backgroundColor: '#82C1F9', // Primary logo sky blue wave
+    zIndex: 0,
   },
-  cardAccentCircle2: {
+  topRightIconContainer: {
     position: 'absolute',
-    right: -10,
-    bottom: -100,
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    opacity: 0.35,
-    zIndex: -1,
-  },
-  atmHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    bottom: -15,
+    left: -15,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  atmLogoBlock: {
-    flexDirection: 'row',
+  topRightValueContainer: {
+    position: 'absolute',
+    bottom: 24,
+    left: 26,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  atmBrandName: {
+  topRightValueText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 13,
-    color: '#FAF9F5',
-    marginLeft: 6,
+    fontSize: 22,
+    color: '#FFFFFF',
+    lineHeight: 25,
+  },
+  topRightValueLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 8,
+    color: '#FFFFFF',
+    letterSpacing: 2,
+    marginTop: -2,
+  },
+  bottomWaveBack: {
+    position: 'absolute',
+    bottom: -45,
+    left: -20,
+    right: -20,
+    height: 85,
+    borderTopLeftRadius: 100,
+    borderTopRightRadius: 70,
+    backgroundColor: '#A9D6FD', // Lighter soft blue wave
+    opacity: 0.65,
+    zIndex: 0,
+  },
+  bottomWaveFront: {
+    position: 'absolute',
+    bottom: -65,
+    left: -35,
+    right: -35,
+    height: 100,
+    borderTopLeftRadius: 120,
+    borderTopRightRadius: 100,
+    backgroundColor: '#82C1F9', // Sky blue bottom wave
+    zIndex: 0,
+  },
+  giftCardLogoBlock: {
+    position: 'absolute',
+    top: 15,
+    left: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  giftCardLogoImg: {
+    width: 52,
+    height: 52,
+  },
+  giftCardLogoDivider: {
+    width: 1.2,
+    height: 20,
+    backgroundColor: '#3D2B1F', // Logo espresso brown color
+    marginHorizontal: 8,
+    opacity: 0.35,
+  },
+  giftCardLogoTextContainer: {
+    justifyContent: 'center',
+  },
+  giftCardLogoTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12.5,
+    color: '#3D2B1F',
+    lineHeight: 14,
+    letterSpacing: 0.2,
+  },
+  giftCardLogoSubtitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#3D2B1F',
+    lineHeight: 10,
+    marginTop: -1,
+  },
+  giftCardMascotImg: {
+    position: 'absolute',
+    bottom: 46,
+    right: -5,
+    width: 145,
+    height: 110,
+    zIndex: 2,
+  },
+  giftCardTitleContainer: {
+    position: 'absolute',
+    top: 56,
+    left: 16,
+    zIndex: 5,
+  },
+  giftCardTitle: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 23,
+    color: '#3D2B1F', // Espresso brown text
+    letterSpacing: 1.5,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
+    width: 125,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#82C1F9', // Underline blue
+  },
+  giftCardQuote: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 7,
+    color: '#3D2B1F', // Espresso brown
     letterSpacing: 1,
   },
-  atmCardType: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 9,
-    letterSpacing: 1.5,
-  },
-  chipAndWifiRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  emvChip: {
-    width: 38,
-    height: 28,
-    borderRadius: 6,
-    position: 'relative',
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  chipLineHorizontal: {
+  giftCardBottomRow: {
     position: 'absolute',
-    top: 13,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: '#5C4A1A',
-  },
-  chipLineVertical: {
-    position: 'absolute',
-    left: 18,
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: '#5C4A1A',
-  },
-  chipCenterCore: {
-    position: 'absolute',
-    width: 10,
-    height: 8,
-    borderRadius: 2,
-    borderWidth: 1,
-    borderColor: '#5C4A1A',
-    backgroundColor: '#FAF9F5',
-    top: 9,
-    left: 13,
-  },
-  contactlessIcon: {
-    marginLeft: 10,
-    transform: [{ rotate: '90deg' }],
-  },
-  cardNumberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 10,
-    zIndex: 5,
-  },
-  atmCardNumber: {
-    fontFamily: 'Courier New',
-    fontWeight: 'bold',
-    fontSize: 20,
-    color: '#FAF9F5',
-    letterSpacing: 1.5,
-  },
-  eyeBtnFront: {
-    marginLeft: 12,
-    padding: 4,
-  },
-  atmFooter: {
+    bottom: 6,
+    left: 15,
+    right: 15,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-  },
-  atmLabel: {
-    fontFamily: 'Poppins',
-    fontSize: 8,
-    color: 'rgba(250, 249, 245, 0.4)',
-    letterSpacing: 0.5,
-  },
-  atmValueName: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 12,
-    color: '#FAF9F5',
-    marginTop: 1,
-  },
-  atmExpiryBlock: {
-    marginLeft: 10,
-  },
-  atmValueDate: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 11,
-    color: '#FAF9F5',
-    marginTop: 1,
-  },
-  atmUnionBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 4,
-  },
-  unionCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    opacity: 0.9,
-  },
-  magneticStripe: {
-    width: '100%',
-    height: 38,
-    backgroundColor: '#111111',
-    marginTop: 2,
-  },
-  signatureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginTop: 10,
     zIndex: 5,
   },
-  signatureStrip: {
-    flex: 3,
-    height: 28,
-    backgroundColor: '#EAE6DB',
-    justifyContent: 'center',
-    paddingLeft: 12,
-    borderWidth: 1,
-    borderColor: '#CCC2B0',
-  },
-  signatureSampleText: {
-    fontFamily: 'Courier New',
-    fontStyle: 'italic',
-    fontWeight: 'bold',
-    fontSize: 13,
-    color: '#1C3144',
-  },
-  cvvStrip: {
-    flex: 1.5,
-    marginLeft: 8,
-    alignItems: 'flex-end',
-  },
-  cvvLabel: {
-    fontFamily: 'Poppins',
-    fontSize: 7,
-    color: 'rgba(250, 249, 245, 0.5)',
-    marginRight: 6,
-  },
-  cvvValueRow: {
+  supportContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(250, 249, 245, 0.15)',
-    paddingHorizontal: 6,
-    height: 24,
   },
-  cvvValue: {
+  supportText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 11,
-    color: '#FAF9F5',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    letterSpacing: 0.2,
+    lineHeight: 8,
   },
-  eyeBtnMini: {
-    marginLeft: 6,
+  cardNoContainer: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  cardNoLabel: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    opacity: 0.8,
+  },
+  cardNoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardNoValue: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#3D2B1F',
+    letterSpacing: 0.5,
+  },
+  eyeBtnMiniFront: {
     padding: 2,
   },
-  backCredentialsContainer: {
-    paddingHorizontal: 20,
-    marginTop: 6,
-    zIndex: 5,
+  eyeBtnMiniBack: {
+    padding: 2,
   },
-  backCredentialItem: {
+  backHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(250, 249, 245, 0.05)',
+    zIndex: 5,
+    width: '100%',
   },
-  backLabel: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 9,
-    color: 'rgba(250, 249, 245, 0.5)',
+  backLogoBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backLogoImg: {
+    width: 20,
+    height: 20,
+  },
+  backBrandText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10,
+    color: '#3D2B1F',
+    marginLeft: 6,
     letterSpacing: 0.5,
   },
-  backVal: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 12,
-    color: '#FAF9F5',
-  },
-  secureValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backAtmFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginTop: 8,
-  },
-  backTermsText: {
-    fontFamily: 'Poppins',
-    fontSize: 7,
-    color: 'rgba(250, 249, 245, 0.35)',
-    flex: 1,
-    paddingRight: 10,
-  },
-  backFlipBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(250, 249, 245, 0.08)',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  backFlipText: {
+  backCardType: {
     fontFamily: 'Poppins-Bold',
     fontSize: 8,
-    color: 'rgba(250, 249, 245, 0.6)',
+    color: '#3D2B1F',
+    opacity: 0.6,
+    letterSpacing: 1,
+  },
+  backCenterBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E8E5DF',
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    marginVertical: 4,
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+    zIndex: 5,
+  },
+  backBarcodeLines: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  backCardCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backCardCodeText: {
+    fontFamily: 'Courier New',
+    fontWeight: 'bold',
+    fontSize: 11,
+    color: '#3D2B1F',
+    letterSpacing: 1.5,
+  },
+  backTermsBlock: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginVertical: 4,
+    zIndex: 5,
+    width: '100%',
+  },
+  backTermsText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    opacity: 0.7,
+    textAlign: 'center',
+    lineHeight: 9,
+  },
+  backScanContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backScanText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 6.5,
+    color: '#3D2B1F',
+    letterSpacing: 0.5,
   },
 });

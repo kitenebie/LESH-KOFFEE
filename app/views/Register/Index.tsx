@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
   // Background circles
   circle: {
     position: 'absolute',
-    backgroundColor: '#F3F0E6',
+    backgroundColor: '#E1EEFA',
     borderRadius: 999,
   },
   circle1: {

@@ -45,7 +45,7 @@ export const login = async (email: string, password: string): Promise<{ success:
         phone: user.phone || '',
         avatar: user.avatar || '',
         memberLevel: user.member_level || 'Bronze',
-        memberLevelLabel: user.member_level_label || 'Lesh Kaffe Bronze Member',
+        memberLevelLabel: user.member_level_label || 'Foam Coffee Bronze Member',
       }, token);
     }
 
@@ -73,7 +73,7 @@ export const register = async (userData: RegisterData): Promise<{ success: boole
         phone: user.phone || '',
         avatar: user.avatar || '',
         memberLevel: user.member_level || 'Bronze',
-        memberLevelLabel: user.member_level_label || 'Lesh Kaffe Bronze Member',
+        memberLevelLabel: user.member_level_label || 'Foam Coffee Bronze Member',
       }, token);
     }
 
@@ -124,7 +124,7 @@ export const resumeSession = async (): Promise<{ success: boolean; data?: LoginR
         phone: user.phone || '',
         avatar: user.avatar || '',
         memberLevel: user.member_level || 'Bronze',
-        memberLevelLabel: user.member_level_label || 'Lesh Kaffe Bronze Member',
+        memberLevelLabel: user.member_level_label || 'Foam Coffee Bronze Member',
       }, token);
     }
 

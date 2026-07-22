@@ -72,3 +72,16 @@ export const createOrder = async (orderData: CreateOrderData): Promise<Order | n
     return null;
   }
 };
+
+/**
+ * Mark an order as paid (called when online payment WebView returns success).
+ */
+export const markOrderPaid = async (orderNumber: string): Promise<boolean> => {
+  try {
+    await api.post(`/orders/${orderNumber}/mark-paid`);
+    return true;
+  } catch (error) {
+    console.warn('[ordersService] Error marking order paid:', error);
+    return false;
+  }
+};

@@ -1,12 +1,12 @@
 export const Colors = {
   primary: {
-    default: '#4A3525', // Rich Espresso Coffee Brown
-    pressed: '#38281C',
+    default: '#2D78CD', // Brand Cloud Blue
+    pressed: '#1D5FA7',
     text: '#FFFFFF',
   },
   secondary: {
-    default: '#B36534', // Warm Teak Wood / Terracotta Accent
-    pressed: '#965228',
+    default: '#1B4D86', // Deep Brand Slate Blue
+    pressed: '#11355F',
     text: '#FFFFFF',
   },
   info: {

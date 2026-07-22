@@ -608,3 +608,34 @@ export async function clearPendingQROrder(): Promise<void> {
   const database = await getDatabase();
   await database.execAsync('DELETE FROM pending_qr_order');
 }
+
+/**
+ * Clear all cached data from SQLite on logout.
+ * Wipes everything except the DB structure itself.
+ */
+export async function clearAllCache(): Promise<void> {
+  const database = await getDatabase();
+  await database.execAsync(`
+    DELETE FROM users;
+    DELETE FROM user_addresses;
+    DELETE FROM categories;
+    DELETE FROM products;
+    DELETE FROM product_customizations;
+    DELETE FROM orders;
+    DELETE FROM order_items;
+    DELETE FROM notifications;
+    DELETE FROM stamp_achievements;
+    DELETE FROM stamp_histories;
+    DELETE FROM user_vouchers;
+    DELETE FROM vouchers;
+    DELETE FROM wallet;
+    DELETE FROM wallet_transactions;
+    DELETE FROM loyalty_transactions;
+    DELETE FROM subscriptions;
+    DELETE FROM promos;
+    DELETE FROM delivery_tracking;
+    DELETE FROM store;
+    DELETE FROM cart_items;
+    DELETE FROM auth_tokens;
+  `);
+}

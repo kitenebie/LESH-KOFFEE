@@ -16,7 +16,7 @@ interface SubscriptionProps {
   plans?: any[];
 }
 
-const CARD_COLORS = ['#5B8A72', '#C67B5C', '#6B5CA5', '#4A7C9B'];
+const CARD_COLORS = [Colors.primary.default, '#4299E1', '#3182CE', '#1B4D86'];
 
 const FALLBACK_PLANS = [
   {

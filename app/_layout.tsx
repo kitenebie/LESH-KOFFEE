@@ -113,8 +113,8 @@ export default function RootLayout() {
   return (
     <AppDataProvider>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" hidden={false} backgroundColor="#B36534" />
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#975328ff' }}>
+        <StatusBar barStyle="light-content" hidden={false} backgroundColor="#2D78CD" />
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#1B4D86' }}>
           <Stack screenOptions={{ animation: 'slide_from_bottom', headerShown: false }} />
         </SafeAreaView>
       </SafeAreaProvider>

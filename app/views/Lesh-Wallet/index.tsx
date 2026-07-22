@@ -40,50 +40,50 @@ interface WalletViewProps {
 
 const tierConfig = {
   Bronze: {
-    baseColor: '#2C2118',
-    borderColor: '#CD7F32',
-    accent1: '#8B4513',
-    accent2: '#CD7F32',
+    baseColor: '#2D78CD', // Foam Coffee Brand Cloud Blue
+    borderColor: '#FAF9F5', // Off-white border
+    accent1: '#1D5FA7', // Deepened Accent Blue
+    accent2: '#E1EEFA', // Soft Accent Blue
     textColor: '#FAF9F5',
-    typeName: 'BRONZE DEBIT',
-    levelName: 'BRONZE MEMBER',
+    typeName: 'FOAM GIFT CARD',
+    levelName: 'FOAM COFFEE MEMBER',
   },
 
   Silver: {
-    baseColor: '#3A3A3C',
-    borderColor: '#C0C0C0',
-    accent1: '#7A7A7C',
-    accent2: '#A5A5A7',
+    baseColor: '#2B6CB0', // Medium Blue
+    borderColor: '#C0C0C0', // Silver border
+    accent1: '#3182CE', // Light Blue Accent
+    accent2: '#C0C0C0',
     textColor: '#FAF9F5',
-    typeName: 'SILVER DEBIT',
+    typeName: 'SILVER GIFT CARD',
     levelName: 'SILVER MEMBER',
   },
 
   Gold: {
-    baseColor: '#3F2F23',
-    borderColor: '#D4AF37',
-    accent1: '#B36534',
-    accent2: '#D4AF37',
+    baseColor: '#1B4D86', // Deep Brand Blue
+    borderColor: '#FAF9F5', // Off-white border
+    accent1: '#2D78CD', // Foam Coffee Cloud Blue Accent
+    accent2: '#FAF9F5',
     textColor: '#FAF9F5',
-    typeName: 'GOLD DEBIT',
+    typeName: 'GOLD GIFT CARD',
     levelName: 'GOLD MEMBER',
   },
   Platinum: {
-    baseColor: '#1C2E3D',
-    borderColor: '#A3B8CC',
-    accent1: '#4F759B',
+    baseColor: '#1A202C', // Very Dark Blue
+    borderColor: '#A3B8CC', // Platinum border
+    accent1: '#4A5568', // Steel Accent
     accent2: '#A3B8CC',
     textColor: '#FAF9F5',
-    typeName: 'PLATINUM DEBIT',
+    typeName: 'PLATINUM GIFT CARD',
     levelName: 'PLATINUM MEMBER',
   },
   Diamond: {
-    baseColor: '#241835',
-    borderColor: '#E0AAFF',
-    accent1: '#7B2CBF',
+    baseColor: '#2D2A4A', // Deep Indigo Blue
+    borderColor: '#E0AAFF', // Diamond purple border
+    accent1: '#5D3FD3', // Royal Purple Accent
     accent2: '#E0AAFF',
     textColor: '#FAF9F5',
-    typeName: 'DIAMOND DEBIT',
+    typeName: 'DIAMOND GIFT CARD',
     levelName: 'DIAMOND MEMBER',
   },
 };
@@ -115,9 +115,9 @@ export default function WalletView({
     : tierConfig[selectedTier];
 
   const [showTierSelector, setShowTierSelector] = useState(false);
-  const [activeWalletTab, setActiveWalletTab] = useState<WalletTab>('subscription');
+  const [activeWalletTab, setActiveWalletTab] = useState<WalletTab>('transactions');
   const [walletTxExpanded, setWalletTxExpanded] = useState(false);
-  const [loyaltyTxExpanded, setLoyaltyTxExpanded] = useState(false);
+  const [loyaltyTxExpanded, setLoyaltyTxExpanded] = useState(true);
 
   // Send Money state
   const [showSendMoney, setShowSendMoney] = useState(false);
@@ -184,21 +184,8 @@ export default function WalletView({
       {/* Wallet Header Row with Cards Selector Icon */}
       <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.paddedHeader}>
         <View style={styles.pageHeaderRow}>
-          <Text style={styles.tabTitle}>Lesh Wallet</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TouchableOpacity 
-              style={styles.cardSelectIconBtn}
-              onPress={() => setShowSendMoney(true)}
-            >
-              <Ionicons name="send-outline" size={22} color={Colors.primary.default} />
-            </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.cardSelectIconBtn}
-            onPress={() => setShowTierSelector(true)}
-          >
-            <Ionicons name="card-outline" size={26} color={Colors.primary.default} />
-          </TouchableOpacity>
-          </View>
+          <Text style={styles.tabTitle}>Foam Wallet</Text>
+          {/* Send Money and Portfolio buttons hidden for now */}
         </View>
       </Animated.View>
 
@@ -225,7 +212,8 @@ export default function WalletView({
           />
         </Animated.View>
 
-        {/* Tab Selector */}
+        {/* Tab Selector - Hidden/Commented out for now */}
+        {/*
         <Animated.View entering={SlideInDown.delay(600).duration(400)} style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tabBtn, activeWalletTab === 'subscription' && styles.tabBtnActive]}
@@ -258,8 +246,10 @@ export default function WalletView({
             </Text>
           </TouchableOpacity>
         </Animated.View>
+        */}
 
-        {/* Tab Content */}
+        {/* Tab Content - Subscription content hidden for now */}
+        {/*
         {activeWalletTab === 'subscription' && (
           <Animated.View entering={SlideInLeft.duration(350)}>
             <Subscription 
@@ -271,10 +261,12 @@ export default function WalletView({
             />
           </Animated.View>
         )}
+        */}
 
         {activeWalletTab === 'transactions' && (
           <Animated.View entering={SlideInRight.duration(350)}>
-            {/* Digital Wallet Transactions */}
+            {/* Digital Wallet Transactions - Hidden for now */}
+            {/*
             <View style={styles.transactionSection}>
               <TouchableOpacity
                 style={styles.transactionSectionHeader}
@@ -282,7 +274,7 @@ export default function WalletView({
                 activeOpacity={0.7}
               >
                 <Ionicons name="wallet-outline" size={18} color={Colors.primary.default} style={{ marginRight: 8 }} />
-                <Text style={styles.transactionSectionTitle}>Lesh Digital Wallet</Text>
+                <Text style={styles.transactionSectionTitle}>Foam Digital Wallet</Text>
                 <View style={styles.txHeaderRight}>
                   <Text style={styles.txCountBadge}>{walletTransactions.length}</Text>
                   <Ionicons name={walletTxExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.neutral.gray500} />
@@ -311,6 +303,7 @@ export default function WalletView({
                 </Animated.View>
               ))}
             </View>
+            */}
 
             {/* Loyalty Points Transactions */}
             <View style={styles.transactionSection}>
@@ -320,7 +313,7 @@ export default function WalletView({
                 activeOpacity={0.7}
               >
                 <Ionicons name="star-outline" size={18} color="#FFD700" style={{ marginRight: 8 }} />
-                <Text style={styles.transactionSectionTitle}>Lesh Loyalty Points</Text>
+                <Text style={styles.transactionSectionTitle}>Foam Loyalty Points</Text>
                 <View style={styles.txHeaderRight}>
                   <Text style={styles.txCountBadge}>{loyaltyTransactions.length}</Text>
                   <Ionicons name={loyaltyTxExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.neutral.gray500} />
@@ -356,6 +349,8 @@ export default function WalletView({
         )}
       </ScrollView>
 
+      {/* ListOfCard portfolio hidden for now */}
+      {/*
       <ListOfCard 
         visible={showTierSelector}
         onClose={() => setShowTierSelector(false)}
@@ -365,6 +360,7 @@ export default function WalletView({
         leshExp={dummyData?.user?.leshExp}
         userName={dummyData?.user?.name}
       />
+      */}
 
       {/* Subscription QR Code Redemption Overlay */}
       <SubscriptionRedeem
@@ -381,15 +377,15 @@ export default function WalletView({
         subscriptionBalance={subscriptionBalance}
       />
 
-      {/* Send Lesh Money Modal */}
+      {/* Send Foam Money Modal */}
       <Modal visible={showSendMoney} animationType="slide" transparent={true}>
         <View style={styles.sendMoneyOverlay}>
           <View style={styles.sendMoneyContainer}>
             <View style={styles.sendMoneyHeader}>
               <Ionicons name="send" size={32} color={Colors.secondary.default} />
-              <Text style={styles.sendMoneyTitle}>Send Lesh Money</Text>
+              <Text style={styles.sendMoneyTitle}>Send Foam Money</Text>
               <Text style={styles.sendMoneySubtitle}>
-                Transfer funds to a friend's Lesh Digital Wallet
+                Transfer funds to a friend's Foam Digital Wallet
               </Text>
             </View>
 
